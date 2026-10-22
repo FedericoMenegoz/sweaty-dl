@@ -1,0 +1,12 @@
+{
+  "identifier": "main",
+  "description": "Permessi dei soli contenuti locali; la pagina Bandcamp non riceve IPC",
+  "local": true,
+  "webviews": [
+    "main",
+    "bandcamp-controls"
+  ],
+  "permissions": [
+    "core:default"
+  ]
+}

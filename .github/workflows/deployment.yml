@@ -1,0 +1,72 @@
+name: Build deployment profiles
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+jobs:
+  profiles:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.targets.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: targets
+        run: echo "matrix=$(python3 scripts/deploy.py --matrix)" >> "$GITHUB_OUTPUT"
+  build:
+    needs: profiles
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.profiles.outputs.matrix) }}
+    runs-on: ${{ matrix.runner }}
+    env:
+      CARGO_NET_OFFLINE: 'false'
+      PYTHONDONTWRITEBYTECODE: '1'
+      APPIMAGE_EXTRACT_AND_RUN: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.11.0'
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Install backend build dependencies
+        run: python -m pip install -r deployment/requirements-build.txt
+      - name: Install FFprobe on macOS
+        if: runner.os == 'macOS'
+        run: brew install ffmpeg
+      - name: Install FFprobe on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install ffmpeg -y --no-progress
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $ffprobe = Get-ChildItem "$env:ChocolateyInstall/lib/ffmpeg" -Filter ffprobe.exe -Recurse | Select-Object -First 1
+          if (-not $ffprobe) { throw 'Actual FFprobe binary not found; do not bundle a Chocolatey shim.' }
+          "SWEATYDL_FFPROBE=$($ffprobe.FullName)" >> $env:GITHUB_ENV
+      - name: Install Linux build and media dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential curl wget file libxdo-dev libssl-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf libfuse2 ffmpeg gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-libav
+      - run: npm ci
+      - run: npm test
+      - run: python -B -m unittest discover -s tests -p "test_*.py"
+      - name: Check Rust formatting
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
+      - name: Test Rust
+        run: cargo test --manifest-path src-tauri/Cargo.toml --locked
+      - name: Build the matching deployment profile
+        run: python -B scripts/deploy.py --target ${{ matrix.profile }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: SweatyDL-${{ matrix.profile }}
+          path: deployments/${{ matrix.profile }}/
+          if-no-files-found: error

@@ -1,0 +1,7 @@
+{
+  "os": "linux",
+  "arch": "x86_64",
+  "target": "x86_64-unknown-linux-gnu",
+  "minimum_os": "Ubuntu 22.04 (glibc 2.35, WebKitGTK 4.1)",
+  "formats": ["deb", "AppImage"]
+}

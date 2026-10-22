@@ -1,0 +1,11 @@
+import { existsSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const suffix = process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python';
+const candidates = [process.env.SWEATYDL_PYTHON, path.join(root, '.build', 'venv', suffix)];
+const python = candidates.find(value => value && existsSync(value)) || (process.platform === 'win32' ? 'python' : 'python3');
+const result = spawnSync(python, ['-B', path.join(root, 'scripts', 'deploy.py'), ...process.argv.slice(2)], { cwd: root, stdio: 'inherit', shell: false });
+if (result.error) console.error(result.error.message);
+process.exit(result.status ?? 1);

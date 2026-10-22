@@ -1,0 +1,7 @@
+{
+  "os": "macos",
+  "arch": "x86_64",
+  "target": "x86_64-apple-darwin",
+  "minimum_os": "15.0",
+  "formats": ["dmg", "app.zip"]
+}

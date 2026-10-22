@@ -1,0 +1,63 @@
+:root { font-family: system-ui, sans-serif; color: #e5e5dc; background: #161916; color-scheme: dark; }
+* { box-sizing: border-box; }
+body { margin: 0; }
+body::before { content: ''; position: fixed; inset: 0; background: url('/vinyl.png') center / cover; opacity: .055; pointer-events: none; }
+main { position: relative; padding: 24px; height: 100dvh; display: flex; flex-direction: column; gap: 16px; }
+form { display: grid; grid-template-columns: 2fr 1.5fr 1fr auto; gap: 12px; align-items: end; }
+label { font-size: 13px; display: grid; gap: 7px; }
+input, select, button { font: inherit; border: 1px solid #4b5348; border-radius: 7px; padding: 10px; min-width: 0; }
+input, select { width: 100%; background: #222722; }
+button { background: #a5b77a; color: #182012; cursor: pointer; }
+button:disabled { opacity: .5; cursor: wait; }
+button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid #c2d89a; outline-offset: 3px; }
+#status { margin: 0; min-height: 40px; font-size: 14px; color: #c6cbbf; }
+.panels { display: grid; grid-template-columns: 1.3fr 1fr; gap: 18px; flex: 1; min-height: 0; }
+section { background: #20251fe8; border: 1px solid #394135; border-radius: 12px; padding: 16px; min-height: 0; display: flex; flex-direction: column; }
+h2 { font-size: 16px; margin: 0 0 14px; }
+ul { list-style: none; padding: 0; margin: 0; overflow-y: auto; flex: 1; min-height: 0; }
+li { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid #394135; }
+li span { flex: 1; overflow-wrap: anywhere; font-size: 14px; }
+li button { flex-shrink: 0; padding: 7px; font-size: 12px; }
+.hint, footer { font-size: 12px; color: #aeb5a6; }
+#bandcamp-actions { font-size: 13px; }
+#bandcamp-actions p { margin: 0 0 8px; }
+.verification-buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+.verification-buttons button { font-size: 12px; padding: 7px; }
+.bandcamp-controls main { padding: 16px; gap: 10px; overflow: hidden; }
+.bandcamp-controls h2, .bandcamp-controls p { margin: 0; }
+.bandcamp-controls .instructions { font-size: 13px; line-height: 1.4; }
+#verification-status { font-size: 13px; padding: 10px; background: #252d23; border-radius: 7px; overflow-wrap: anywhere; }
+#choices { min-height: 60px; }
+#choices li { padding: 9px 4px; }
+#choices label { display: flex; align-items: start; gap: 9px; cursor: pointer; width: 100%; }
+#choices input { width: auto; flex-shrink: 0; margin-top: 3px; }
+#choices li[data-selected="true"] { background: #a5b77a18; }
+#choices span { font-size: 13px; }
+#cancel-verification { background: #252d23; color: #e5e5dc; font-size: 12px; padding: 7px; }
+.automatic-verification #choices,
+.automatic-verification #selection-count,
+.automatic-verification #use-all-results,
+.automatic-verification #confirm-selection { display: none; }
+#preview-player:not([hidden]) { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid #394135; border-radius: 8px; background: #20251fe8; }
+#preview-status { flex: 1; font-size: 13px; overflow-wrap: anywhere; }
+#preview-progress { width: 90px; accent-color: #a5b77a; }
+#stop-preview { font-size: 12px; padding: 7px; }
+#download-tools { display: grid; grid-template-columns: minmax(150px, .8fr) minmax(180px, 2fr) auto auto; gap: 10px; align-items: end; }
+#download-tools label { gap: 5px; }
+#download-tools input, #download-tools button { font-size: 12px; padding: 8px; }
+#url-file { padding: 5px; }
+#download-feedback { display: flex; align-items: center; gap: 12px; min-height: 32px; }
+#download-status { margin: 0; font-size: 12px; flex: 1; overflow-wrap: anywhere; }
+#download-progress { width: 130px; accent-color: #a5b77a; }
+@media (max-height: 650px) { main { padding: 16px; gap: 10px; } section { padding: 12px; } .hint { margin-bottom: 0; } }
+.destination-picker { display: flex; gap: 6px; }
+.destination-picker input { flex: 1; min-width: 0; }
+.destination-picker button { flex-shrink: 0; }
+footer { display: flex; align-items: center; justify-content: space-between; }
+#show-diagnostics { font-size: 11px; padding: 3px 10px; background: #252d23; color: #c6cbbf; }
+#diagnostic-dialog { color: #e5e5dc; background: #20251f; border: 1px solid #59634d; border-radius: 12px; padding: 18px; width: min(860px, 92vw); max-height: 85dvh; }
+#diagnostic-dialog::backdrop { background: #0009; }
+#diagnostic-status { font-size: 12px; overflow-wrap: anywhere; }
+#diagnostic-content { display: block; width: 100%; height: 45dvh; resize: none; background: #151914; color: #d8e2ce; font: 11px/1.5 ui-monospace, monospace; white-space: pre; border: 1px solid #4b5348; border-radius: 6px; padding: 10px; }
+.diagnostic-buttons { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+.diagnostic-buttons button { font-size: 12px; padding: 7px; }
