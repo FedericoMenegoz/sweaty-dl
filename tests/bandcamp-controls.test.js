@@ -4,7 +4,7 @@ import test from 'node:test';
 import vm from 'node:vm';
 
 const source = readFileSync(new URL('../src/bandcamp-controls.js', import.meta.url), 'utf8')
-  .replace(/^\s*import\s+[^\r\n]*;?\s*$/gm, '');
+ .replace(/^import[^\r\n]*;[ \t]*\r?$/gm, '');
 const track = { title: 'Song', artist: 'Artist', url: 'https://artist.bandcamp.com/track/song' };
 const tick = () => new Promise(resolve => setImmediate(resolve));
 
