@@ -8,7 +8,7 @@ import { canPreview, createPreviewPlayer } from '../src/preview-player.js';
 
 function mainHarness(invoke = async () => { throw new Error('Unexpected command'); }) {
   const source = readFileSync(new URL('../src/main-app.js', import.meta.url), 'utf8')
-    .replace(/^import .*;\n/gm, '');
+    .replace(/^import[^\r\n]*;[ \t]*\r?$/gm, '');
   const elements = new Map();
   const events = new Map();
   const element = () => ({ textContent: '', children: [], dataset: {}, isConnected: true,
