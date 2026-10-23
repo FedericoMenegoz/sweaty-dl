@@ -4,7 +4,7 @@ import test from 'node:test';
 import vm from 'node:vm';
 
 const source = readFileSync(new URL('../src/bandcamp-controls.js', import.meta.url), 'utf8')
-  .replace(/^import .*;\n/gm, '');
+  .replace(/^\s*import\s+[^\r\n]*;?\s*$/gm, '');
 const track = { title: 'Song', artist: 'Artist', url: 'https://artist.bandcamp.com/track/song' };
 const tick = () => new Promise(resolve => setImmediate(resolve));
 
@@ -24,7 +24,7 @@ async function panel(load, transfer = async () => { throw new Error('Unexpected 
       if (!elements.has(selector)) elements.set(selector, element());
       return elements.get(selector);
     },
-    createElement: element,
+    createElement: element,F
   };
   const context = vm.createContext({
     document,
