@@ -24,7 +24,7 @@ async function panel(load, transfer = async () => { throw new Error('Unexpected 
       if (!elements.has(selector)) elements.set(selector, element());
       return elements.get(selector);
     },
-    createElement: element,F
+    createElement: element,
   };
   const context = vm.createContext({
     document,
