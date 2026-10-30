@@ -13,7 +13,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - id: targets
-        run: echo "matrix=$(python3 scripts/deploy.py --matrix)" >> "$GITHUB_OUTPUT"
+        shell: bash
+        run: |
+          set -euo pipefail
+      
+          matrix="$(python3 -B scripts/deploy.py --matrix)"
+      
+          if [ -z "$matrix" ]; then
+            echo "::error::Deployment matrix is empty"
+            exit 1
+          fi
+      
+          echo "$matrix" | python3 -m json.tool > /dev/null
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          echo "Deployment matrix: $matrix"
   build:
     needs: profiles
     strategy:
