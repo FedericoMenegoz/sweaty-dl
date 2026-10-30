@@ -1,6 +1,7 @@
 import hashlib
 import json
 from pathlib import Path
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -16,6 +17,43 @@ import runtime_tools
 
 
 class DeploymentTests(unittest.TestCase):
+    def test_matrix_cli_outputs_all_profiles_without_building(self):
+        result = subprocess.run(
+            [sys.executable, '-B', str(ROOT / 'scripts/deploy.py'), '--matrix'],
+            cwd=tempfile.gettempdir(), capture_output=True, text=True, check=True)
+        self.assertEqual(json.loads(result.stdout), {'include': [
+            {'profile': 'linux-1', 'runner': 'ubuntu-22.04'},
+            {'profile': 'mac-1', 'runner': 'macos-15-intel'},
+            {'profile': 'windows-1', 'runner': 'windows-latest'},
+        ]})
+
+    def test_matrix_cli_can_select_one_profile(self):
+        result = subprocess.run(
+            [sys.executable, '-B', str(ROOT / 'scripts/deploy.py'),
+             '--matrix', '--target', 'linux-1'],
+            capture_output=True, text=True, check=True)
+        self.assertEqual(json.loads(result.stdout), {'include': [
+            {'profile': 'linux-1', 'runner': 'ubuntu-22.04'},
+        ]})
+
+    def test_main_writes_build_results_and_returns_failure_for_a_failed_build(self):
+        profile = next(item for item in deploy.profiles() if item['os'] == 'linux')
+        for failure in (False, True):
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as directory:
+                output = Path(directory) / 'deployments'
+                with patch.object(sys, 'argv', ['deploy.py', '--target', profile['name']]), \
+                        patch.object(deploy, 'OUTPUT', output), \
+                        patch('deploy.platform.system', return_value='Linux'), \
+                        patch('deploy.platform.machine', return_value='x86_64'), \
+                        patch.object(deploy, 'build', return_value=[],
+                                     side_effect=RuntimeError('Build failed') if failure else None), \
+                        patch('builtins.print'):
+                    self.assertEqual(deploy.main(), 1 if failure else 0)
+                results = json.loads((output / 'build-results.json').read_text())
+                self.assertEqual(len(results), 1)
+                self.assertEqual(results[0]['status'], 'failed' if failure else 'built-needs-installation-test')
+                self.assertEqual(json.loads((output / profile['name'] / 'build-result.json').read_text()), results[0])
+
     def test_each_folder_has_a_result_even_when_specs_are_incomplete(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
