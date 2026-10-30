@@ -115,7 +115,7 @@ def build(profile, skip_backend=False):
     environment = dict(os.environ)
     if profile['os'] == 'macos':
         environment['MACOSX_DEPLOYMENT_TARGET'] = profile['minimum_os']
-    bundles = {'macos': 'app', 'windows': 'nsis', 'linux': ','.join(profile['formats'])}
+    bundles = {'macos': 'app', 'windows': 'nsis', 'linux': ','.join(format_name.lower() for format_name in profile['formats'])}
     run([npm, 'run', 'tauri', '--', 'build', '--features', 'bundled-backend', '--config', config_path,
          '--target', profile['target'], '--bundles', bundles[profile['os']]], env=environment)
     bundle = ROOT / 'src-tauri' / 'target' / profile['target'] / 'release' / 'bundle'

@@ -102,12 +102,13 @@ class DeploymentTests(unittest.TestCase):
                         continue
                     artifacts = deploy.build(profile, skip_backend=True)
                     self.assertEqual(len(artifacts), 2)
+                    self.assertEqual({Path(artifact['file']).suffix for artifact in artifacts}, {'.deb', '.AppImage'})
                     for artifact in artifacts:
                         output = root / artifact['file']
                         self.assertEqual(output.read_bytes(), b'package fixture')
                         self.assertEqual(artifact['sha256'], hashlib.sha256(output.read_bytes()).hexdigest())
                     command = build.call_args.args[0]
-                    self.assertEqual(set(command[-1].split(',')), {'deb', 'AppImage'})
+                    self.assertEqual(command[command.index('--bundles') + 1], 'deb,appimage')
                     config = json.loads((root / '.build/tauri-linux-1.json').read_text())
                     self.assertTrue(config['bundle']['linux']['appimage']['bundleMediaFramework'])
                     self.assertNotIn('windows', config['bundle'])
