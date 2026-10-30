@@ -18,7 +18,7 @@ HOST_OS = {'Darwin': 'macos', 'Windows': 'windows', 'Linux': 'linux'}
 HOST_ARCH = {'AMD64': 'x86_64', 'x86_64': 'x86_64', 'arm64': 'aarch64', 'aarch64': 'aarch64'}
 SUPPORTED = {('macos', 'x86_64'): ('x86_64-apple-darwin', ['dmg', 'app.zip']),
              ('windows', 'x86_64'): ('x86_64-pc-windows-msvc', ['nsis.exe']),
-             ('linux', 'x86_64'): ('x86_64-unknown-linux-gnu', ['deb', 'AppImage'])}
+             ('linux', 'x86_64'): ('x86_64-unknown-linux-gnu', ['deb', 'appimage'])}
 
 
 def profiles(root=PROFILES):
