@@ -1,4 +1,4 @@
-    from package_backend import package, RESOURCES
+from package_backend import package, RESOURCES
     if not skip_backend:
         package()
     proof = json.loads((RESOURCES / 'build-info.json').read_text())
