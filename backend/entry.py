@@ -6,6 +6,7 @@ import sys
 
 # Explicit imports let PyInstaller discover both protocols and their dependencies.
 import bridge
+import collection_resolver
 import download
 import diagnostics
 import provider_search
@@ -37,8 +38,13 @@ def self_test():
             audio.setnchannels(1); audio.setsampwidth(2); audio.setframerate(8000)
             audio.writeframes(b'\x00\x00' * 16000)
         download.validate_duration(File(path).info.length, 2)
+    # Exercise the new operation through the packaged bridge without networking.
+    album = bridge.handle({'operation': 'resolve_media_url',
+                           'url': 'https://fixture.bandcamp.com/album/collection'})
+    assert album['complete'] and album['kind'] == 'album' and len(album['results']) == 1
     assert not any(name.startswith(('PySide', 'PyQt')) for name in sys.modules)
     return {'ok': True, 'frozen': bool(getattr(sys, 'frozen', False)),
+            'playlist_resolution': True,
             'python': sys.version.split()[0], 'yt_dlp': version('yt-dlp'),
             'tools': tools, 'qt_loaded': False}
 

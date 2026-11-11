@@ -20,6 +20,7 @@ Only download music you have permission to download. Respect artists' wishes and
 - **Preview tracks:** Listen to a short Bandcamp preview before adding a track to your queue.
 - **Manage downloads:** Queue tracks, choose a destination folder, cancel downloads, and retry failures.
 - **Import links:** Add multiple downloads from a `.txt` file containing one HTTPS URL per line.
+- **Import playlists:** Paste a SoundCloud or YouTube playlist link into the title/search field to add its tracks to your selection. Bandcamp album links use the existing album downloader.
 - **Keep everything local:** Save your selection locally and inspect diagnostic logs when something goes wrong.
 
 ### Audio quality and limitations
@@ -28,7 +29,19 @@ SweatyDL downloads the audio format available from the source. It does not provi
 
 Bandcamp currently exposes an MP3 128 kbps stream to the downloader. A track appearing in search results does not guarantee that its audio can be downloaded.
 
-Preview playback currently supports individual Bandcamp tracks. General playlists are not supported, and Bandcamp albums can only be downloaded when every track is available.
+Preview playback currently supports individual Bandcamp tracks. Bandcamp albums can only be downloaded when every track is available.
+
+### Downloading a playlist or album
+
+1. Paste an HTTPS link into **Title or link** and press **Search**. The link determines the source; the artist and source controls apply to text searches.
+2. SoundCloud and YouTube playlists add individual tracks to **Selection** in playlist order. A Bandcamp album adds one album entry that downloads all its available tracks through the existing album flow.
+3. Check the import summary and remove any unwanted entries, then press **Download**. Importing a link does not start audio downloads.
+
+Supported inputs include SoundCloud `/artist/sets/playlist` URLs and `on.soundcloud.com` share links, YouTube `/playlist?list=...` URLs, individual track/video links, and Bandcamp `/album/...` URLs. A YouTube video link containing `list=` imports the playlist; remove that parameter to import only the video.
+
+Playlist import supports public, finite playlists of up to 500 entries, with up to 2,000 items in the selection. Channels, profile libraries, radio mixes, login-required playlists, and livestreams are outside this feature. Known unavailable entries are reported; a failed or oversized playlist scan does not add a partial selection. Availability may still change before downloading. Failed individual downloads remain retryable, and completed entries are skipped when retrying or re-importing the same tracks.
+
+Playlist expansion currently applies to links submitted through **Title or link**. TXT import keeps its existing URL-reference behavior and does not expand playlists.
 
 ## Platform support
 

@@ -1,0 +1,37 @@
+{
+  "valid": [
+    {"input": " https://artist.bandcamp.com/album/a-release?from=search ", "source": "Bandcamp", "kind": "album", "url": "https://artist.bandcamp.com/album/a-release"},
+    {"input": "https://artist.bandcamp.com/track/song-live/", "source": "Bandcamp", "kind": "track", "url": "https://artist.bandcamp.com/track/song-live"},
+    {"input": "https://www.soundcloud.com/artist/sets/a-playlist?utm_source=share", "source": "SoundCloud", "kind": "playlist", "url": "https://soundcloud.com/artist/sets/a-playlist"},
+    {"input": "https://m.soundcloud.com/artist/a-track/", "source": "SoundCloud", "kind": "track", "url": "https://soundcloud.com/artist/a-track"},
+    {"input": "https://on.soundcloud.com/ShareId?si=tracking", "source": "SoundCloud", "kind": "short", "url": "https://on.soundcloud.com/ShareId"},
+    {"input": "https://music.youtube.com/playlist?si=tracking&list=PLexample", "source": "YouTube", "kind": "playlist", "url": "https://www.youtube.com/playlist?list=PLexample"},
+    {"input": "https://m.youtube.com/watch?v=abcdefghijk&list=PLexample&index=2", "source": "YouTube", "kind": "playlist", "url": "https://www.youtube.com/playlist?list=PLexample"},
+    {"input": "https://youtu.be/abcdefghijk?list=PLexample", "source": "YouTube", "kind": "playlist", "url": "https://www.youtube.com/playlist?list=PLexample"},
+    {"input": "https://youtu.be/abcdefghijk?si=tracking&t=20", "source": "YouTube", "kind": "track", "url": "https://www.youtube.com/watch?v=abcdefghijk"},
+    {"input": "https://www.youtube.com/shorts/abcdefghijk#fragment", "source": "YouTube", "kind": "track", "url": "https://www.youtube.com/watch?v=abcdefghijk"}
+  ],
+  "invalid": [
+    "http://youtube.com/playlist?list=PLexample",
+    "https://youtube.com.evil.example/playlist?list=PLexample",
+    "https://soundcloud.com.evil.example/artist/sets/list",
+    "https://user:password@youtube.com/watch?v=abcdefghijk",
+    "https://youtube.com:8443/watch?v=abcdefghijk",
+    "https://youtube.com/playlist?list=",
+    "https://youtube.com/playlist?list=PLone&list=PLtwo",
+    "https://youtube.com/watch?v=short",
+    "https://youtube.com/watch?v=abcdefghijk&list=",
+    "https://youtube.com/playlist?list=RDabcdefghijk",
+    "https://youtube.com/playlist?list=ULabcdefghijk",
+    "https://youtube.com/@channel",
+    "https://youtube.com/results?search_query=music",
+    "https://soundcloud.com/artist",
+    "https://soundcloud.com/artist/likes",
+    "https://soundcloud.com/discover/sets/weekly",
+    "https://soundcloud.com/artist//track",
+    "https://soundcloud.com/artist/a%2fb",
+    "https://artist.bandcamp.com/music",
+    "file:///tmp/audio.mp3",
+    "https://127.0.0.1/audio"
+  ]
+}

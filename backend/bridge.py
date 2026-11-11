@@ -14,6 +14,17 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 
 def handle(payload):
+    if payload.get('operation') == 'resolve_media_url':
+        from collection_resolver import resolve_media_url, UserError
+        diag.stage('resolve_media_url')
+        # Expected import errors must reach the native caller without exposing
+        # arbitrary extractor exceptions or signed audio URLs.
+        try:
+            with contextlib.redirect_stdout(sys.stderr):
+                return resolve_media_url(payload.get('url'))
+        except UserError as error:
+            diag.exception(error)
+            return {'error': diag.clean_text(error)}
     if payload.get('operation') != 'search':
         raise ValueError('Unsupported operation')
     title = payload.get('title', '')

@@ -46,14 +46,15 @@ export function initDownloads({ document, invoke, isTauri, getQueue, save, stopP
   const start = document.querySelector('#download-start');
   const cancel = document.querySelector('#download-cancel');
   const progress = document.querySelector('#download-progress');
-  let busy = false, cancelled = false, activeId = null;
+  let busy = false, importing = false, cancelled = false, activeId = null;
   try { destination.value = storage.getItem('sweatydl-next-destination') || ''; } catch { /* optional preference */ }
   const update = () => {
-    start.disabled = busy; choose.disabled = busy; cancel.hidden = !busy; input.disabled = busy; destination.disabled = busy;
-    for (const button of document.querySelectorAll?.('#queue button, #results button') || []) button.disabled = busy;
+    const locked = busy || importing || !canStart();
+    start.disabled = locked; choose.disabled = locked; cancel.hidden = !busy; input.disabled = locked; destination.disabled = locked;
+    for (const button of document.querySelectorAll?.('#queue button, #results button') || []) button.disabled = locked;
   };
   choose.onclick = async () => {
-    if (busy || !isTauri()) return;
+    if (busy || importing || !canStart() || !isTauri()) return;
     try {
       const folder = await invoke('choose_download_directory');
       if (folder) { destination.value = folder; try { storage.setItem('sweatydl-next-destination', folder); } catch { /* optional */ } }
@@ -61,7 +62,9 @@ export function initDownloads({ document, invoke, isTauri, getQueue, save, stopP
   };
   input.onchange = async () => {
     const file = input.files?.[0];
-    if (!file || busy) return;
+    if (!file || busy || importing || !canStart()) return;
+    // Hold the queue while file.text() is pending, just as during a download.
+    importing = true; update();
     try {
       if (file.size > 1024 * 1024) throw new Error('The TXT file must be no larger than 1 MB.');
       const report = parseUrlText(await file.text(), getQueue());
@@ -70,7 +73,7 @@ export function initDownloads({ document, invoke, isTauri, getQueue, save, stopP
       const persisted = save();
       message.textContent = `URLs added: ${report.added.length}; duplicates: ${report.duplicates}.${report.invalid.length ? ` Invalid lines: ${report.invalid.slice(0, 15).join(', ')}${report.invalid.length > 15 ? '…' : ''}.` : ''}${persisted === false ? ' Unable to save the selection.' : ''}`;
     } catch (error) { diagnose('txt_import_failed', { error: String(error) }, 'error'); message.textContent = error.message; }
-    finally { input.value = ''; }
+    finally { input.value = ''; importing = false; update(); }
   };
   cancel.onclick = async () => {
     cancelled = true; cancel.disabled = true;
@@ -81,7 +84,7 @@ export function initDownloads({ document, invoke, isTauri, getQueue, save, stopP
     }
   };
   start.onclick = async () => {
-    if (busy) return;
+    if (busy || importing) return;
     if (!canStart()) { message.textContent = 'Wait for the search to finish before starting the download.'; return; }
     if (!isTauri()) { message.textContent = 'Launch the Tauri app to download.'; return; }
     const pending = getQueue().filter(track => track.downloadStatus !== 'done');
@@ -126,5 +129,6 @@ export function initDownloads({ document, invoke, isTauri, getQueue, save, stopP
     const track = getQueue().find(item => item.downloadStatus === 'running');
     message.textContent = `${track?.title || 'Audio'} · ${payload.total ? `Track ${payload.index}/${payload.total} · ` : ''}${typeof payload.progress === 'number' ? `${Math.round(payload.progress * 100)}%` : 'Downloading…'}`;
   }).catch(() => { /* Final command response remains authoritative. */ });
-  return { busy: () => busy };
+  update();
+  return { busy: () => busy || importing, updateControls: update };
 }

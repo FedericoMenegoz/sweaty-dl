@@ -3,10 +3,11 @@ import { isTauri } from '@tauri-apps/api/core';
 import { invokeLogged as invoke, initDiagnostics, recordDiagnostic } from './diagnostics.js';
 import { initDownloads } from './download-ui.js';
 import { canPreview, createPreviewPlayer } from './preview-player.js';
+import { classifyMediaInput, bandcampReference, resolvedMediaItems, mergeMediaQueue } from './media-input.js';
 
 const app = document.querySelector('#app');
 app.innerHTML = `
-  <form id="search"><label>Title<input name="title" required maxlength="500" placeholder="Search for a track"></label>
+  <form id="search"><label>Title or link<input name="title" required maxlength="8192" placeholder="Search for a track or paste a link"></label>
   <label>Artist<input name="artist" maxlength="500" placeholder="Optional"></label>
   <label>Source<select name="mode"><option value="auto">Automatic</option><option>Bandcamp</option><option>SoundCloud</option><option>YouTube</option></select></label>
   <button id="search-button">Search</button></form>
@@ -68,7 +69,7 @@ const preview = createPreviewPlayer({
 });
 document.querySelector('#stop-preview').onclick = () => preview.stop();
 globalThis.addEventListener?.('pagehide', () => preview.stop(''));
-status.textContent = isTauri() ? 'Ready. Enter a title to search for.' : 'UI preview: launch Tauri to enable search.';
+status.textContent = isTauri() ? 'Ready. Enter a title or a link to a track, album, or playlist.' : 'UI preview: launch Tauri to enable search.';
 function row(track, label, action) {
   const li = document.createElement('li');
   const text = document.createElement('span');
@@ -77,7 +78,7 @@ function row(track, label, action) {
     : track.downloadStatus === 'error' ? ` · ${track.downloadError}` : '';
   text.textContent = `${track.title} — ${track.artist || ''} (${track.source || ''})${downloadLabel}`;
   const button = document.createElement('button');
-  button.type = 'button'; button.textContent = label; button.onclick = () => { if (!downloads.busy()) action(); };
+  button.type = 'button'; button.textContent = label; button.onclick = () => { if (!searchBusy && !downloads.busy()) action(); };
   li.append(text);
   if (canPreview(track)) {
     const listen = document.createElement('button');
@@ -86,7 +87,7 @@ function row(track, label, action) {
     listen.dataset.url = track.url;
     listen.dataset.title = track.title;
     listen.setAttribute('aria-label', `Preview: ${track.title}`);
-    listen.onclick = () => { if (!downloads.busy()) preview.toggle(track); };
+    listen.onclick = () => { if (!searchBusy && !downloads.busy()) preview.toggle(track); };
     previewButtons.add(listen);
     li.append(listen);
   }
@@ -111,8 +112,10 @@ function showResults(report) {
   preview.stop('');
   const results = report.results.filter(validTrack);
   document.querySelector('#results').replaceChildren(...results.map(track => row(track, 'Save', () => {
-    if (!queue.some(item => item.url === track.url)) queue.push(track);
-    renderQueue();
+    try {
+      queue = mergeMediaQueue(queue, [track]).queue;
+      renderQueue();
+    } catch (error) { status.textContent = String(error); }
   })));
   return results.length;
 }
@@ -133,13 +136,33 @@ document.querySelector('#search').onsubmit = async event => {
   if (!isTauri()) { status.textContent = 'Search requires npm run tauri dev.'; return; }
   preview.stop('');
   searchBusy = true;
+  downloads.updateControls();
   const button = document.querySelector('#search-button'); button.disabled = true;
   status.textContent = 'Searching…';
   document.querySelector('#close-bandcamp').disabled = true;
   document.querySelector('#bandcamp-actions').hidden = true;
-  document.querySelector('#results').replaceChildren();
   try {
     const input = Object.fromEntries(new FormData(event.target));
+    const media = classifyMediaInput(input.title);
+    if (media.type === 'url') {
+      status.textContent = `Importing ${media.source}${media.kind === 'playlist' ? ' · playlist' : ''}…`;
+      const report = media.source === 'Bandcamp' ? null : await invoke('resolve_media_url', { url: media.url });
+      const tracks = report ? resolvedMediaItems(report, media) : [bandcampReference(media)];
+      const imported = mergeMediaQueue(queue, tracks);
+      queue = imported.queue;
+      const persisted = renderQueue();
+      showResults({ results: tracks });
+      const unit = `${media.kind === 'album' ? 'album' : 'track'}${imported.added === 1 ? '' : 's'}`;
+      status.textContent = `${media.source}: ${imported.added} ${unit} added to the selection; ${imported.duplicates} duplicates; ${report?.unavailable_count || 0} unavailable. Press «Download» to start downloading.`
+        + (media.kind === 'album' ? ' The album will be downloaded using the existing Bandcamp workflow.' : '')
+        + (media.videoContext ? ' The entire playlist was selected: remove the list parameter from the link to import only the video.' : '')
+        + (report?.warnings.length ? ` ${report.warnings.join(' ')}` : '')
+        + (persisted ? '' : ' Warning: the selection is available only for this session because it could not be saved.');
+      return;
+    }
+    input.title = media.text;
+    if (typeof input.artist !== 'string' || input.artist.length > 500) throw new Error('Invalid artist (maximum 500 characters).');
+    document.querySelector('#results').replaceChildren();
     let report;
     if (input.mode === 'Bandcamp') {
       const query = [input.artist.trim(), input.title.trim()].filter(Boolean).join(' ');
@@ -153,6 +176,7 @@ document.querySelector('#search').onsubmit = async event => {
   } catch (error) { status.textContent = String(error); }
   finally {
     searchBusy = false;
+    downloads.updateControls();
     button.disabled = false;
     document.querySelector('#bandcamp-actions').hidden = true;
   }
@@ -160,18 +184,20 @@ document.querySelector('#search').onsubmit = async event => {
 
 if (isTauri()) {
   getCurrentWebview().listen('bandcamp-results-imported', ({ payload: report }) => {
+    if (downloads.busy()) return;
     const count = showResults(report);
     status.textContent = `${count} results imported from the Bandcamp page. Press «Save» on the items you want to keep.`;
   }).catch(error => { status.textContent = `Bandcamp import unavailable: ${error}`; });
   getCurrentWebview().listen('bandcamp-confirmed', ({ payload: report }) => {
+    if (downloads.busy()) return;
     const selected = report.results.filter(validTrack);
     showResults(report);
-    let added = 0;
-    for (const track of selected) {
-      if (!queue.some(item => item.url === track.url)) { queue.push(track); added++; }
-    }
-    if (renderQueue()) {
-      status.textContent = `${added} references added to the selection (${selected.length} confirmed by Bandcamp). Full file not yet verified.`;
-    }
+    try {
+      const imported = mergeMediaQueue(queue, selected);
+      queue = imported.queue;
+      if (renderQueue()) {
+        status.textContent = `${imported.added} references added to the selection (${selected.length} confirmed by Bandcamp). Full file not yet verified.`;
+      }
+    } catch (error) { status.textContent = String(error); }
   }).catch(error => { status.textContent = `Bandcamp connection unavailable: ${error}`; });
 }

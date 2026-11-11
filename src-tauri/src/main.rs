@@ -8,6 +8,7 @@ mod bandcamp;
 mod bandcamp_window;
 mod diagnostics;
 mod download;
+mod media_resolver;
 mod preview;
 mod runtime;
 
@@ -113,6 +114,7 @@ fn main() {
         .manage(bandcamp_window::BandcampSession::default())
         .manage(preview::PreviewState::default())
         .manage(download::DownloadState::default())
+        .manage(media_resolver::ResolverState::default())
         .setup(|app| {
             diagnostics::initialize(app.handle());
             Ok(())
@@ -121,11 +123,13 @@ fn main() {
             if window.label() == "main" && matches!(event, tauri::WindowEvent::Destroyed) {
                 diagnostics::event("info", "app", "", "shutdown", json!({}));
                 download::shutdown(window.app_handle());
+                media_resolver::shutdown(window.app_handle());
                 window.app_handle().exit(0);
             }
         })
         .invoke_handler(tauri::generate_handler![
             search,
+            media_resolver::resolve_media_url,
             diagnostics::diagnostic_event,
             diagnostics::diagnostic_report,
             diagnostics::show_log_directory,
