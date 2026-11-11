@@ -36,24 +36,24 @@ def emit(message_type, **values):
 
 def check_cancel():
     if CANCELLED.is_set():
-        raise InterruptedError('Download annullato.')
+        raise InterruptedError('Download cancelled.')
 
 
 def public_url(value):
     if not isinstance(value, str) or len(value) > 8192 or any(ord(c) < 32 for c in value):
-        raise UserError('URL non valido.')
+        raise UserError('Invalid URL.')
     url = urlparse(value)
     host = url.hostname or ''
     if url.scheme != 'https' or url.username or url.password or url.port not in (None, 443):
-        raise UserError('Usa un URL HTTPS senza credenziali.')
+        raise UserError('Use an HTTPS URL without credentials.')
     if '.' not in host or host.endswith(('.local', '.localhost', '.internal')):
-        raise UserError('Indirizzo locale non consentito.')
+        raise UserError('Local address not allowed.')
     try:
         if not ipaddress.ip_address(host).is_global:
-            raise UserError('Indirizzo locale non consentito.')
+            raise UserError('Local address not allowed.')
     except ValueError as error:
         # Hostnames are resolved and checked again at the socket boundary.
-        if 'non consentito' in str(error):
+        if 'not allowed' in str(error):
             raise
     return url
 
@@ -68,7 +68,7 @@ def public_connections():
         check_cancel()
         if sock.family in (socket.AF_INET, socket.AF_INET6):
             if not ipaddress.ip_address(address[0].split('%')[0]).is_global:
-                raise UserError('Connessione a un indirizzo locale non consentita.')
+                raise UserError('Connections to local addresses are not allowed.')
         return original(sock, address)
 
     def checked_ex(sock, address):
@@ -92,9 +92,9 @@ def safe_name(value):
 
 def validate_duration(actual, expected):
     if not isinstance(expected, (int, float)) or not math.isfinite(expected) or not 0 < expected <= 86400:
-        raise UserError('Durata del brano non disponibile.')
+        raise UserError('Track duration unavailable.')
     if not math.isfinite(actual) or abs(actual - expected) > max(.25, min(2.0, expected * .01)):
-        raise UserError('La durata del file non corrisponde al brano: potrebbe essere un campione.')
+        raise UserError('The file duration does not match the track: it may be a sample.')
 
 
 def measured_duration(path):
@@ -108,7 +108,7 @@ def measured_duration(path):
     # WebM is not supported by mutagen. Probe it if the existing tool is installed.
     probe = tool('ffprobe')
     if not probe:
-        raise UserError('Serve ffprobe per verificare la durata di questo formato audio.')
+        raise UserError('ffprobe is required to check the duration of this audio format.')
     import subprocess
     result = subprocess.run([probe, '-v', 'error', '-show_entries', 'format=duration',
                              '-of', 'json', str(path)], capture_output=True, timeout=20, check=True)
@@ -136,7 +136,7 @@ def publish(path, folder, filename, expected):
                     result.update(block)
             return result.digest()
         if digest(path) != digest(target):
-            raise UserError('Il file esiste già nella destinazione; non è stato sovrascritto.') from None
+            raise UserError('The file already exists in the destination; it was not overwritten.') from None
     path.unlink()
     return str(target)
 
@@ -149,7 +149,7 @@ def bandcamp_stream(track, temporary, destination):
         check_cancel()
         parsed = public_url(stream)
         if not parsed.hostname.endswith('.bcbits.com') or not parsed.path.startswith('/stream/'):
-            raise UserError('Sorgente Bandcamp non consentita.')
+            raise UserError('Bandcamp source not allowed.')
         with requests.get(stream, stream=True, timeout=(15, 20), allow_redirects=False) as response:
             diag.log('bandcamp_http_response', http_status=response.status_code,
                      content_type=response.headers.get('Content-Type'), content_length=response.headers.get('Content-Length'))
@@ -160,7 +160,7 @@ def bandcamp_stream(track, temporary, destination):
             response.raise_for_status()
             total = int(response.headers.get('Content-Length') or 0)
             if total > 1024 ** 3:
-                raise UserError('File audio troppo grande.')
+                raise UserError('Audio file too large.')
             diag.stage('bandcamp_transfer', expected_bytes=total)
             path = temporary / 'stream.mp3'
             done = 0
@@ -170,17 +170,17 @@ def bandcamp_stream(track, temporary, destination):
                     check_cancel()
                     done += len(chunk)
                     if done > 1024 ** 3:
-                        raise UserError('File audio troppo grande.')
+                        raise UserError('Audio file too large.')
                     output.write(chunk)
                     if time.monotonic() - last > .15:
                         emit('progress', progress=min(.99, done / total) if total else None)
                         last = time.monotonic()
             if not done or (total and done != total):
-                raise UserError('Il trasferimento del file è incompleto.')
+                raise UserError('The file transfer is incomplete.')
             identity = hashlib.sha256(track['track_url'].encode()).hexdigest()[:12]
             name = f"{safe_name(track.get('title', 'audio'))} [{identity}].mp3"
             return publish(path, destination / 'Bandcamp', name, track['duration'])
-    raise UserError('Troppi reindirizzamenti durante il download.')
+    raise UserError('Too many redirects during download.')
 
 
 class QuietLogger:
@@ -208,7 +208,7 @@ def extracted_audio(url, temporary, destination):
         total = info.get('total_bytes') or info.get('total_bytes_estimate')
         done = info.get('downloaded_bytes') or 0
         if done > 1024 ** 3:
-            raise UserError('File audio troppo grande.')
+            raise UserError('Audio file too large.')
         emit('progress', progress=min(.99, done / total) if total else None)
         last = time.monotonic()
 
@@ -253,22 +253,22 @@ def extract_with(Downloader, UrllibRH, options, url, temporary, destination):
         diag.stage('extract_metadata', resource=diag.resource(url))
         info = downloader.extract_info(url, download=False)
         if not info or info.get('_type', 'video') != 'video':
-            raise UserError('Inserisci il collegamento a un singolo brano o video, non una playlist.')
+            raise UserError('Enter a link to a single track or video, not a playlist.')
         if info.get('is_live') or info.get('live_status') in ('is_live', 'is_upcoming', 'post_live'):
-            raise UserError('Le dirette non sono supportate.')
+            raise UserError('Live streams are not supported.')
         if info.get('has_drm') or info.get('availability') in ('premium_only', 'subscriber_only', 'needs_auth'):
-            raise UserError('Questo contenuto richiede un accesso non disponibile.')
+            raise UserError('This content requires unavailable account access.')
         expected = info.get('duration')
         validate_duration(expected, expected)
         if info.get('protocol') not in ('https', 'm3u8_native', 'http_dash_segments'):
-            raise UserError('Questo formato non offre un trasferimento audio nativo supportato.')
+            raise UserError('This format does not offer a supported native audio transfer.')
         # Use exactly the resolved entry; never search for replacements.
         diag.stage('transfer_audio', extractor=info.get('extractor_key'), format_id=info.get('format_id'),
                    protocol=info.get('protocol'), duration=expected)
         downloader.process_info(info)
         files = [p for p in temporary.iterdir() if p.is_file() and p.suffix not in ('.part', '.ytdl', '.tmp')]
         if len(files) != 1:
-            raise UserError('Il trasferimento audio non ha prodotto un file completo.')
+            raise UserError('The audio transfer did not produce a complete file.')
         path = files[0]
         source = safe_name(info.get('extractor_key') or 'Audio')
         identity = hashlib.sha256(url.encode()).hexdigest()[:12]
@@ -282,13 +282,13 @@ def run(payload):
     public_url(url)
     destination = Path(payload['destination']).expanduser()
     if not destination.is_absolute():
-        raise UserError('La destinazione deve essere un percorso assoluto.')
+        raise UserError('The destination must be an absolute path.')
     diag.stage('prepare_destination', destination=str(destination))
     destination.mkdir(parents=True, exist_ok=True)
     files = []
     tracks = payload.get('tracks')
     if tracks is not None and (not isinstance(tracks, list) or not 0 < len(tracks) <= 500):
-        raise UserError('Nessun audio Bandcamp disponibile.')
+        raise UserError('No Bandcamp audio available.')
     with public_connections():
         # One directory per job, cleaned on errors and cooperative cancellation.
         with tempfile.TemporaryDirectory(prefix='audio-', dir=payload.get('temporary', destination)) as folder:
@@ -308,8 +308,8 @@ def error_message(error):
         return str(error)
     # Exceptions from HTTP/extractors can contain signed URLs: never forward them.
     if isinstance(error, ImportError):
-        return 'Manca una dipendenza audio nell’ambiente Python di sviluppo.'
-    return 'Download non riuscito: verifica rete, disponibilità del contenuto o verifica richiesta dal sito.'
+        return 'An audio dependency is missing from the development Python environment.'
+    return 'Download failed: check your network, content availability, or any verification required by the site.'
 
 
 if __name__ == '__main__':
@@ -318,7 +318,7 @@ if __name__ == '__main__':
         while b'\n' not in buffer:
             chunk = os.read(sys.stdin.fileno(), 4096)
             if not chunk or len(buffer) + len(chunk) > 1024 * 1024:
-                raise UserError('Richiesta del downloader non valida.')
+                raise UserError('Invalid downloader request.')
             buffer.extend(chunk)
         line, _, remainder = buffer.partition(b'\n')
         payload = json.loads(line)

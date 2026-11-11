@@ -53,7 +53,7 @@ test('all imported catalog results are shown for choice without automatically sa
   assert.equal(elements.get('#results').children.length, 2);
   assert.equal(elements.get('#queue').children.length, 0);
   assert.deepEqual(saved, ['[]']);
-  assert.match(elements.get('#status').textContent, /2 risultati importati/);
+  assert.match(elements.get('#status').textContent, /2 results imported/);
 });
 
 test('Bandcamp search opens the browser directly and waits for its automatic result', async () => {
@@ -101,7 +101,7 @@ test('cancelling the browser does not import results or leave search disabled', 
   let cancel;
   const view = mainHarness(async command => {
     if (command === 'search_bandcamp_browser') return new Promise((_, reject) => { cancel = reject; });
-    if (command === 'close_bandcamp') { cancel('Ricerca Bandcamp annullata.'); return; }
+    if (command === 'close_bandcamp') { cancel('Bandcamp search cancelled.'); return; }
     throw new Error(`Unexpected command ${command}`);
   });
   const pending = view.submit({ title: 'Song', artist: '', mode: 'Bandcamp' });
@@ -109,13 +109,13 @@ test('cancelling the browser does not import results or leave search disabled', 
   await pending;
   assert.equal(view.elements.get('#results').children.length, 0);
   assert.equal(view.elements.get('#search-button').disabled, false);
-  assert.match(view.elements.get('#status').textContent, /annullata/);
+  assert.match(view.elements.get('#status').textContent, /cancelled/);
 });
 
 test('an explicitly empty result completes the automatic search', async () => {
   const view = mainHarness(async () => ({ results: [], errors: {} }));
   await view.submit({ title: 'Song', artist: '', mode: 'Bandcamp' });
-  assert.match(view.elements.get('#status').textContent, /^0 risultati/);
+  assert.match(view.elements.get('#status').textContent, /^0 results/);
   assert.equal(view.elements.get('#bandcamp-actions').hidden, true);
   assert.equal(view.elements.get('#search-button').disabled, false);
 });

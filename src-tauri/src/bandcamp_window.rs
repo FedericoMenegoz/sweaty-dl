@@ -29,7 +29,7 @@ impl SessionData {
 
     fn complete(&mut self, generation: u64, report: Value) -> Result<(), String> {
         if !self.current(generation) {
-            return Err("Ricerca Bandcamp annullata.".into());
+            return Err("Bandcamp search cancelled.".into());
         }
         if self.completed.is_none() {
             self.completed = Some(report);
@@ -70,7 +70,7 @@ pub async fn open_bandcamp(
         let mut session = state
             .0
             .lock()
-            .map_err(|_| "Sessione Bandcamp non disponibile.")?;
+            .map_err(|_| "Bandcamp session unavailable.")?;
         let changed = session.expected.as_ref() != Some(&url)
             || session.cancelled
             || session.completed.is_some()
@@ -88,7 +88,7 @@ pub async fn open_bandcamp(
     if let Some(window) = app.get_window("bandcamp-verification") {
         if changed {
             app.get_webview("bandcamp-page")
-                .ok_or("Pagina Bandcamp non disponibile.")?
+                .ok_or("Bandcamp page unavailable.")?
                 .navigate(url)
                 .map_err(|e| e.to_string())?;
             let _ = app.emit_to(
@@ -103,12 +103,12 @@ pub async fn open_bandcamp(
     }
 
     let window = WindowBuilder::new(app, "bandcamp-verification")
-        .title("Bandcamp — verifica e attesa dei risultati")
+        .title("Bandcamp — verification and waiting for results")
         .inner_size(1200.0, 760.0)
         .min_inner_size(920.0, 580.0)
         .visible(false)
         .build()
-        .map_err(|e| format!("Apertura Bandcamp non riuscita: {e}"))?;
+        .map_err(|e| format!("Failed to open Bandcamp: {e}"))?;
     let result = (|| -> Result<(), String> {
         // Capability scopes name only this local webview, never the shared native window.
         window
@@ -122,7 +122,7 @@ pub async fn open_bandcamp(
                 LogicalPosition::new(0.0, 0.0),
                 LogicalSize::new(340.0, 760.0),
             )
-            .map_err(|e| format!("Pannello Bandcamp non disponibile: {e}"))?;
+            .map_err(|e| format!("Bandcamp panel unavailable: {e}"))?;
         let navigation_app = app.clone();
         let loaded_app = app.clone();
         let popup_app = app.clone();
@@ -166,7 +166,7 @@ pub async fn open_bandcamp(
                 LogicalPosition::new(340.0, 0.0),
                 LogicalSize::new(860.0, 760.0),
             )
-            .map_err(|e| format!("Pagina Bandcamp non disponibile: {e}"))?;
+            .map_err(|e| format!("Bandcamp page unavailable: {e}"))?;
         Ok(())
     })();
     if let Err(error) = result {
@@ -178,7 +178,7 @@ pub async fn open_bandcamp(
         .state::<BandcampSession>()
         .0
         .lock()
-        .map_err(|_| "Sessione Bandcamp non disponibile.")?
+        .map_err(|_| "Bandcamp session unavailable.")?
         .generation;
     window.on_window_event(move |event| {
         if matches!(
@@ -212,7 +212,7 @@ pub async fn bandcamp_context(webview: Webview) -> Result<Value, String> {
     let session = state
         .0
         .lock()
-        .map_err(|_| "Sessione Bandcamp non disponibile.")?;
+        .map_err(|_| "Bandcamp session unavailable.")?;
     let query = session.expected.as_ref().and_then(|url| {
         url.query_pairs()
             .find(|(key, _)| key == "q")
@@ -230,23 +230,26 @@ pub async fn import_bandcamp(webview: Webview) -> Result<Value, String> {
         let session = state
             .0
             .lock()
-            .map_err(|_| "Sessione Bandcamp non disponibile.")?;
+            .map_err(|_| "Bandcamp session unavailable.")?;
         (
             session
                 .expected
                 .clone()
-                .ok_or("Apri prima la verifica Bandcamp.")?,
+                .ok_or("Open Bandcamp verification first.")?,
             session.generation,
         )
     };
     let browser = app
         .get_webview("bandcamp-page")
-        .ok_or("La finestra Bandcamp è chiusa: riaprila prima di importare.")?;
+        .ok_or("The Bandcamp window is closed: reopen it before importing.")?;
     // The user may refine the query or switch filters in the visible browser.
     // Bind this read to its current search page, rather than the launch URL.
     let source = browser.url().map_err(|e| e.to_string())?;
     if !bandcamp::is_search_page(&source) {
-        return Err("La pagina visualizzata non è una ricerca Bandcamp. Premi «Torna alla ricerca» per riaprirla.".into());
+        return Err(
+            "The displayed page is not a Bandcamp search. Press «Return to search» to reopen it."
+                .into(),
+        );
     }
     let (tx, mut rx) = tokio::sync::oneshot::channel();
     let tx = Mutex::new(Some(tx));
@@ -258,42 +261,44 @@ pub async fn import_bandcamp(webview: Webview) -> Result<Value, String> {
                 }
             }
         })
-        .map_err(|e| format!("Lettura Bandcamp non riuscita: {e}"))?;
+        .map_err(|e| format!("Failed to read Bandcamp: {e}"))?;
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
     let raw = loop {
         if !app
             .state::<BandcampSession>()
             .0
             .lock()
-            .map_err(|_| "Sessione Bandcamp non disponibile.")?
+            .map_err(|_| "Bandcamp session unavailable.")?
             .current(generation)
             || app.get_window("bandcamp-verification").is_none()
         {
-            return Err("Ricerca Bandcamp annullata.".into());
+            return Err("Bandcamp search cancelled.".into());
         }
         match rx.try_recv() {
             Ok(raw) => break raw,
             Err(tokio::sync::oneshot::error::TryRecvError::Closed) => {
-                return Err("Lettura Bandcamp interrotta.".into())
+                return Err("Bandcamp reading interrupted.".into())
             }
             Err(tokio::sync::oneshot::error::TryRecvError::Empty) => {}
         }
         if std::time::Instant::now() >= deadline {
-            return Err("Lettura scaduta. Attendi il caricamento della pagina e premi «Aggiorna risultati».".into());
+            return Err(
+                "Reading timed out. Wait for the page to load and press «Refresh results».".into(),
+            );
         }
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     };
     if !bandcamp::matches_search(&browser.url().map_err(|e| e.to_string())?, &source) {
-        return Err("La pagina è cambiata durante la lettura. Aggiorna i risultati.".into());
+        return Err("The page changed while reading. Refresh the results.".into());
     }
     let mut report = bandcamp::validate_snapshot(&raw, &source)?;
     let state = app.state::<BandcampSession>();
     let mut session = state
         .0
         .lock()
-        .map_err(|_| "Sessione Bandcamp non disponibile.")?;
+        .map_err(|_| "Bandcamp session unavailable.")?;
     if !session.current(generation) || session.expected.as_ref() != Some(&expected) {
-        return Err("La ricerca è cambiata. Aggiorna i risultati.".into());
+        return Err("The search changed. Refresh the results.".into());
     }
     report["session"] = json!(generation);
     report["query"] = json!(source
@@ -311,24 +316,24 @@ pub async fn use_bandcamp_results(webview: Webview) -> Result<usize, String> {
     let report = import_bandcamp(webview.clone()).await?;
     let count = report["results"].as_array().map_or(0, Vec::len);
     if count == 0 {
-        return Err("Nessun brano o album da trasferire dalla pagina visualizzata.".into());
+        return Err("No tracks or albums to transfer from the displayed page.".into());
     }
     {
         let state = webview.state::<BandcampSession>();
         let mut session = state
             .0
             .lock()
-            .map_err(|_| "Sessione Bandcamp non disponibile.")?;
+            .map_err(|_| "Bandcamp session unavailable.")?;
         if session.automatic {
             if report["ready_for_import"].as_bool() != Some(true) {
                 return Err(
-                    "La pagina sta ancora caricando. Il trasferimento avverrà appena pronta."
+                    "The page is still loading. Results will be transferred when it is ready."
                         .into(),
                 );
             }
             let generation = report["session"]
                 .as_u64()
-                .ok_or("Sessione Bandcamp non valida.")?;
+                .ok_or("Invalid Bandcamp session.")?;
             session.complete(generation, report)?;
             return Ok(count);
         }
@@ -359,15 +364,15 @@ pub async fn confirm_bandcamp(
         let session = state
             .0
             .lock()
-            .map_err(|_| "Sessione Bandcamp non disponibile.")?;
+            .map_err(|_| "Bandcamp session unavailable.")?;
         if session.generation != generation {
-            return Err("La ricerca è cambiata. Aggiorna i risultati prima di confermare.".into());
+            return Err("The search changed. Refresh the results before confirming.".into());
         }
         bandcamp::selected_report(
             session
                 .report
                 .as_ref()
-                .ok_or("Leggi prima i risultati Bandcamp.")?,
+                .ok_or("Read the Bandcamp results first.")?,
             &selected_urls,
         )?
     };
@@ -387,13 +392,13 @@ pub async fn return_bandcamp_search(webview: Webview) -> Result<(), String> {
         .state::<BandcampSession>()
         .0
         .lock()
-        .map_err(|_| "Sessione Bandcamp non disponibile.")?
+        .map_err(|_| "Bandcamp session unavailable.")?
         .expected
         .clone()
-        .ok_or("Apri prima la verifica Bandcamp.")?;
+        .ok_or("Open Bandcamp verification first.")?;
     webview
         .get_webview("bandcamp-page")
-        .ok_or("La pagina Bandcamp è chiusa.")?
+        .ok_or("The Bandcamp page is closed.")?
         .navigate(expected)
         .map_err(|e| e.to_string())
 }
@@ -405,7 +410,7 @@ pub async fn close_bandcamp(webview: Webview) -> Result<(), String> {
         .state::<BandcampSession>()
         .0
         .lock()
-        .map_err(|_| "Sessione Bandcamp non disponibile.")?
+        .map_err(|_| "Bandcamp session unavailable.")?
         .cancel();
     if let Some(window) = webview.get_window("bandcamp-verification") {
         window.close().map_err(|e| e.to_string())?;
@@ -446,7 +451,7 @@ async fn search_bandcamp_auto(
         .state::<BandcampSession>()
         .0
         .lock()
-        .map_err(|_| "Sessione Bandcamp non disponibile.")?
+        .map_err(|_| "Bandcamp session unavailable.")?
         .generation;
     let mut last_message = String::new();
     loop {
@@ -455,9 +460,9 @@ async fn search_bandcamp_auto(
             let session = state
                 .0
                 .lock()
-                .map_err(|_| "Sessione Bandcamp non disponibile.")?;
+                .map_err(|_| "Bandcamp session unavailable.")?;
             if session.generation != generation {
-                return Err("Ricerca Bandcamp annullata.".into());
+                return Err("Bandcamp search cancelled.".into());
             }
             (
                 session.completed.clone(),
@@ -471,7 +476,7 @@ async fn search_bandcamp_auto(
             if let Some(window) = app.get_window("bandcamp-verification") {
                 let _ = window.close();
             }
-            return Err("Ricerca Bandcamp annullata.".into());
+            return Err("Bandcamp search cancelled.".into());
         }
         if let Some(report) = completed {
             if let Some(window) = app.get_window("bandcamp-verification") {
@@ -488,11 +493,11 @@ async fn search_bandcamp_auto(
                 app.state::<BandcampSession>()
                     .0
                     .lock()
-                    .map_err(|_| "Sessione Bandcamp non disponibile.")?
+                    .map_err(|_| "Bandcamp session unavailable.")?
                     .complete(generation, report)?;
                 continue;
             }
-            Ok(_) => "Attendo che Bandcamp completi il caricamento dei risultati…".to_string(),
+            Ok(_) => "Waiting for Bandcamp to finish loading results…".to_string(),
             Err(error) => error,
         };
         if message != last_message {

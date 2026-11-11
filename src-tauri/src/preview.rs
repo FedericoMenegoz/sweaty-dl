@@ -18,7 +18,7 @@ fn track_url(value: &str) -> Result<tauri::Url, String> {
     let mut url = bandcamp::catalog_url(value)?;
     let path = url.path().trim_end_matches('/').to_owned();
     if !path.starts_with("/track/") || path.split('/').filter(|s| !s.is_empty()).count() != 2 {
-        return Err("L’anteprima richiede un singolo brano Bandcamp.".into());
+        return Err("Preview requires a single Bandcamp track.".into());
     }
     url.set_path(&path);
     Ok(url)
@@ -26,11 +26,11 @@ fn track_url(value: &str) -> Result<tauri::Url, String> {
 
 fn decode(raw: &str) -> Result<Value, String> {
     if raw.len() > 1024 * 1024 {
-        return Err("Metadati di anteprima troppo grandi.".into());
+        return Err("Preview metadata too large.".into());
     }
-    let value: Value = serde_json::from_str(raw).map_err(|_| "Metadati audio non leggibili.")?;
+    let value: Value = serde_json::from_str(raw).map_err(|_| "Unreadable audio metadata.")?;
     if let Some(raw) = value.as_str() {
-        serde_json::from_str(raw).map_err(|_| "Metadati audio non leggibili.".into())
+        serde_json::from_str(raw).map_err(|_| "Unreadable audio metadata.".into())
     } else {
         Ok(value)
     }
@@ -38,16 +38,16 @@ fn decode(raw: &str) -> Result<Value, String> {
 
 fn validate(value: &Value, expected: &tauri::Url) -> Result<Value, String> {
     for key in ["url", "track_url"] {
-        let actual = track_url(value[key].as_str().ok_or("Brano audio non identificato.")?)?;
+        let actual = track_url(value[key].as_str().ok_or("Audio track not identified.")?)?;
         if &actual != expected {
-            return Err("La pagina audio non corrisponde al brano selezionato.".into());
+            return Err("The audio page does not match the selected track.".into());
         }
     }
     let stream = value["stream_url"]
         .as_str()
         .filter(|s| s.len() <= 8192)
-        .ok_or("Sorgente audio non disponibile.")?;
-    let url = tauri::Url::parse(stream).map_err(|_| "Sorgente audio non valida.")?;
+        .ok_or("Audio source unavailable.")?;
+    let url = tauri::Url::parse(stream).map_err(|_| "Invalid audio source.")?;
     if url.scheme() != "https"
         || !url.host_str().is_some_and(|h| h.ends_with(".bcbits.com"))
         || !url.path().starts_with("/stream/")
@@ -55,12 +55,12 @@ fn validate(value: &Value, expected: &tauri::Url) -> Result<Value, String> {
         || !url.username().is_empty()
         || url.password().is_some()
     {
-        return Err("Sorgente di anteprima Bandcamp non consentita.".into());
+        return Err("Bandcamp preview source not allowed.".into());
     }
     let duration = value["duration"]
         .as_f64()
         .filter(|n| n.is_finite() && *n > 0.0 && *n <= 86400.0)
-        .ok_or("Durata audio non disponibile per questo brano.")?;
+        .ok_or("Audio duration unavailable for this track.")?;
     Ok(
         json!({"url": expected.as_str(), "stream_url": stream, "duration": duration,
         "kind": "stream_preview", "download": false}),
@@ -71,16 +71,16 @@ fn validate_download(value: &Value, expected: &tauri::Url) -> Result<Value, Stri
     let rows = value["tracks"]
         .as_array()
         .filter(|r| !r.is_empty() && r.len() <= 500)
-        .ok_or("Nessun audio Bandcamp disponibile.")?;
+        .ok_or("No Bandcamp audio available.")?;
     let mut tracks = Vec::new();
     let mut seen = std::collections::HashSet::new();
     for row in rows {
-        let url = track_url(row["track_url"].as_str().ok_or("Brano non identificato.")?)?;
+        let url = track_url(row["track_url"].as_str().ok_or("Track not identified.")?)?;
         if url.host_str() != expected.host_str()
             || (!expected.path().starts_with("/album/") && url != *expected)
             || !seen.insert(url.to_string())
         {
-            return Err("Il brano non appartiene alla pagina selezionata.".into());
+            return Err("The track does not belong to the selected page.".into());
         }
         let mut checked = row.clone();
         checked["url"] = json!(url.as_str());
@@ -113,7 +113,7 @@ pub async fn cancel_preview(webview: Webview, request_id: String) -> Result<(), 
     require_local(&webview, false)?;
     let label = {
         let state = webview.state::<PreviewState>();
-        let mut jobs = state.0.lock().map_err(|_| "Anteprima non disponibile.")?;
+        let mut jobs = state.0.lock().map_err(|_| "Preview unavailable.")?;
         if jobs
             .active
             .as_ref()
@@ -173,12 +173,12 @@ async fn read_media(
             .bytes()
             .all(|c| c.is_ascii_alphanumeric() || c == b'-')
     {
-        return Err("Richiesta di anteprima non valida.".into());
+        return Err("Invalid preview request.".into());
     }
     let app = webview.app_handle();
     let (label, previous) = {
         let state = app.state::<PreviewState>();
-        let mut jobs = state.0.lock().map_err(|_| "Anteprima non disponibile.")?;
+        let mut jobs = state.0.lock().map_err(|_| "Preview unavailable.")?;
         jobs.generation += 1;
         let label = format!("preview-reader-{}", jobs.generation);
         let previous = jobs.active.replace((request_id.clone(), label.clone()));
@@ -191,7 +191,7 @@ async fn read_media(
     let loaded = Arc::new(AtomicBool::new(false));
     let load_flag = loaded.clone();
     let window = WebviewWindowBuilder::new(app, &label, WebviewUrl::External(expected.clone()))
-        .title("Audio Bandcamp — completa l’eventuale verifica")
+        .title("Bandcamp audio — complete any verification")
         .inner_size(920.0, 680.0)
         .visible(false)
         .incognito(true)
@@ -211,7 +211,7 @@ async fn read_media(
         })
         .initialization_script("document.addEventListener('play', e => e.target.pause?.(), true);")
         .build()
-        .map_err(|_| "Impossibile aprire la pagina di anteprima.")?;
+        .map_err(|_| "Unable to open the preview page.")?;
     diag::event(
         "info",
         "media.prepare",
@@ -238,10 +238,10 @@ async fn read_media(
         let mut shown = false;
         loop {
             if !active(app, &request_id) {
-                return Err("Anteprima annullata.".into());
+                return Err("Preview cancelled.".into());
             }
             if std::time::Instant::now() >= deadline {
-                return Err("La preparazione dell’anteprima è scaduta. Riprova.".into());
+                return Err("Preview preparation timed out. Try again.".into());
             }
             if !loaded.load(Ordering::Relaxed) {
                 tokio::time::sleep(std::time::Duration::from_millis(100)).await;
@@ -257,26 +257,26 @@ async fn read_media(
                         }
                     }
                 })
-                .map_err(|_| "Lettura dell’anteprima non riuscita.")?;
+                .map_err(|_| "Failed to read the preview.")?;
             let callback_deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
             let raw = loop {
                 if !active(app, &request_id) {
-                    return Err("Anteprima annullata.".into());
+                    return Err("Preview cancelled.".into());
                 }
                 match rx.try_recv() {
                     Ok(raw) => break raw,
                     Err(tokio::sync::oneshot::error::TryRecvError::Closed) => {
-                        return Err("Lettura dell’anteprima interrotta.".into())
+                        return Err("Preview reading interrupted.".into())
                     }
                     Err(_) => {}
                 }
                 if std::time::Instant::now() >= callback_deadline {
-                    return Err("La pagina audio non risponde. Riprova.".into());
+                    return Err("The audio page is not responding. Try again.".into());
                 }
                 tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             };
             let value = decode(&raw)?;
-            let current = window.url().map_err(|_| "Pagina audio non disponibile.")?;
+            let current = window.url().map_err(|_| "Audio page unavailable.")?;
             let same_page = bandcamp::catalog_url(current.as_str()).ok().as_ref() == Some(&expected)
                 && value["url"]
                     .as_str()
@@ -290,13 +290,13 @@ async fn read_media(
                         return if download { validate_download(&value, &expected) } else { validate(&value, &expected) };
                     },
                     Some("unavailable") => {
-                        return Err("Audio non disponibile per tutti i brani selezionati: non posso salvare un album parziale.".into())
+                        return Err("Audio is unavailable for some selected tracks: unable to save a partial album.".into())
                     }
                     Some("challenge") if !shown => {
                         diag::event("info", "media.prepare", &request_id, "manual_verification_required", json!({}));
                         window
                             .show()
-                            .map_err(|_| "Impossibile mostrare la verifica audio.")?;
+                            .map_err(|_| "Unable to show audio verification.")?;
                         let _ = window.set_focus();
                         shown = true;
                     }
@@ -315,7 +315,7 @@ async fn read_media(
         }
     }
     if !still_active {
-        return Err("Anteprima annullata.".into());
+        return Err("Preview cancelled.".into());
     }
     result
 }

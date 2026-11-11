@@ -14,7 +14,7 @@ mod runtime;
 fn require_local(webview: &Webview, controls: bool) -> Result<(), String> {
     let url = webview.url().map_err(|e| e.to_string())?;
     if !bandcamp::authorized_local(webview.label(), &url, controls) {
-        return Err("Comando non autorizzato per questa pagina.".into());
+        return Err("Command not authorized for this page.".into());
     }
     Ok(())
 }
@@ -40,7 +40,7 @@ fn bridge(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|e| format!("Avvio Python fallito: {e}"))?;
+        .map_err(|e| format!("Failed to start Python: {e}"))?;
     let stderr_reader = diagnostics::capture_stderr(
         child.stderr.take().unwrap(),
         "search.worker",
@@ -68,9 +68,9 @@ fn bridge(
         json!({"code":output.status.code()}),
     );
     if !output.status.success() {
-        return Err("Ricerca fallita nel backend di sviluppo. Consulta il log.".into());
+        return Err("Search failed in the development backend. Check the log.".into());
     }
-    serde_json::from_slice(&output.stdout).map_err(|e| format!("Risposta backend non valida: {e}"))
+    serde_json::from_slice(&output.stdout).map_err(|e| format!("Invalid backend response: {e}"))
 }
 
 #[tauri::command]
@@ -83,10 +83,10 @@ async fn search(
 ) -> Result<Value, String> {
     require_local(&webview, false)?;
     if title.trim().is_empty() || title.len() > 500 || artist.len() > 500 {
-        return Err("Inserisci un titolo valido (massimo 500 caratteri).".into());
+        return Err("Enter a valid title (maximum 500 characters).".into());
     }
     if !["auto", "Bandcamp", "SoundCloud", "YouTube"].contains(&mode.as_str()) {
-        return Err("Sorgente non valida.".into());
+        return Err("Invalid source.".into());
     }
     let id = trace_id.unwrap_or_else(|| diagnostics::request_id("search"));
     let mut trace = diagnostics::Span::new(
@@ -145,5 +145,5 @@ fn main() {
             bandcamp_window::return_bandcamp_search
         ])
         .run(tauri::generate_context!())
-        .expect("Impossibile avviare SweatyDL");
+        .expect("Unable to start SweatyDL");
 }

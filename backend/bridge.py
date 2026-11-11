@@ -15,16 +15,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 def handle(payload):
     if payload.get('operation') != 'search':
-        raise ValueError('Operazione non supportata')
+        raise ValueError('Unsupported operation')
     title = payload.get('title', '')
     artist = payload.get('artist', '')
     mode = payload.get('mode', 'auto')
     if not isinstance(title, str) or not title.strip() or len(title) > 500:
-        raise ValueError('Titolo non valido')
+        raise ValueError('Invalid title')
     if not isinstance(artist, str) or len(artist) > 500:
-        raise ValueError('Artista non valido')
+        raise ValueError('Invalid artist')
     if mode not in ('auto', 'Bandcamp', 'SoundCloud', 'YouTube'):
-        raise ValueError('Sorgente non valida')
+        raise ValueError('Invalid source')
     from provider_search import search_tracks
     # stdout is reserved for the JSON protocol, including dependency messages.
     diag.stage('search_providers', mode=mode)

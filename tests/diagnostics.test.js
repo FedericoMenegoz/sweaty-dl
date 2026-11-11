@@ -4,8 +4,8 @@ import { createLoggedInvoker } from '../src/diagnostics.js';
 
 test('IPC diagnostics correlate failures without recording arguments or returned media URLs', async () => {
   const records = [];
-  const invoke = createLoggedInvoker(async () => { throw 'Download non riuscito.'; }, (...args) => records.push(args), () => 'trace-one');
-  await assert.rejects(invoke('download_audio', { url: 'https://cdn.example/stream?token=SECRET', destination: '/private/user' }), error => error.includes('[rif. trace-one]'));
+  const invoke = createLoggedInvoker(async () => { throw 'Download failed.'; }, (...args) => records.push(args), () => 'trace-one');
+  await assert.rejects(invoke('download_audio', { url: 'https://cdn.example/stream?token=SECRET', destination: '/private/user' }), error => error.includes('[ref. trace-one]'));
   assert.equal(records[0][3], 'trace-one');
   assert.equal(records[1][0], 'ipc_failed');
   assert.equal(records[1][3], 'trace-one');

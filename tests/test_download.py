@@ -39,7 +39,7 @@ class DownloadTests(unittest.TestCase):
             temporary.write_bytes(audio_bytes())
             worker.publish(temporary, final.parent, final.name, 2)
             temporary.write_bytes(audio_bytes(2.01))
-            with self.assertRaisesRegex(ValueError, 'esiste già'):
+            with self.assertRaisesRegex(ValueError, 'already exists'):
                 worker.publish(temporary, final.parent, final.name, 2)
 
     def test_truncated_sample_is_never_published(self):
@@ -47,7 +47,7 @@ class DownloadTests(unittest.TestCase):
             root = Path(folder)
             temporary = root / 'partial.wav'
             temporary.write_bytes(audio_bytes())
-            with self.assertRaisesRegex(ValueError, 'campione'):
+            with self.assertRaisesRegex(ValueError, 'sample'):
                 worker.publish(temporary, root / 'destination', 'audio.wav', 240)
             self.assertFalse((root / 'destination/audio.wav').exists())
 
@@ -58,7 +58,7 @@ class DownloadTests(unittest.TestCase):
         response.headers = {'Location': 'https://evil.example/stream/file'}
         track = {'stream_url': 'https://t4.bcbits.com/stream/file'}
         with patch('requests.get', return_value=response) as request:
-            with self.assertRaisesRegex(ValueError, 'non consentita'):
+            with self.assertRaisesRegex(ValueError, 'not allowed'):
                 worker.bandcamp_stream(track, Path('/tmp'), Path('/tmp'))
             self.assertEqual(request.call_count, 1)
 
@@ -209,7 +209,7 @@ with patch('requests.get', return_value=response):
         import socket
         with worker.public_connections():
             with socket.socket() as connection:
-                with self.assertRaisesRegex(ValueError, 'locale'):
+                with self.assertRaisesRegex(ValueError, 'local'):
                     connection.connect(('127.0.0.1', 80))
 
     def test_durations_require_finite_complete_audio(self):

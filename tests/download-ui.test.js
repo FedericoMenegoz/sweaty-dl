@@ -49,7 +49,7 @@ test('downloads sequentially, keeps errors retryable and skips confirmed complet
   await view.nodes.get('#download-start').onclick();
   assert.equal(calls.length, 2); assert.equal(queue[0].downloadStatus, 'error');
   assert.equal(queue[1].downloadStatus, 'done'); assert.equal(view.control.busy(), false);
-  assert.match(view.nodes.get('#download-status').textContent, /1 voci scaricate; 1 errori/);
+  assert.match(view.nodes.get('#download-status').textContent, /Downloaded: 1; errors: 1/);
   assert.equal(JSON.parse(view.records.get('sweatydl-next-download-history')).length, 1);
 });
 
@@ -59,7 +59,7 @@ test('cancel stops the active request, retains it for retry and never starts the
   const view = harness(queue, async (command, args) => {
     calls.push(command);
     if (command === 'download_audio') return new Promise((_, fail) => { reject = fail; });
-    if (command === 'cancel_download') reject(new Error('Download annullato.'));
+    if (command === 'cancel_download') reject(new Error('Download cancelled.'));
   });
   const running = view.nodes.get('#download-start').onclick();
   assert.equal(view.control.busy(), true);
@@ -77,7 +77,7 @@ test('file selection imports references and allows importing the same file again
   input.files = [{ size: 100, text: async () => 'https://vimeo.com/123\nwrong\nhttps://vimeo.com/123' }];
   await input.onchange();
   assert.equal(queue.length, 1); assert.equal(input.value, '');
-  assert.match(view.nodes.get('#download-status').textContent, /1 URL aggiunti; 1 duplicati. Righe non valide: 2/);
+  assert.match(view.nodes.get('#download-status').textContent, /URLs added: 1; duplicates: 1. Invalid lines: 2/);
 });
 
 function snapshot(data, path = '/album/collection') {

@@ -3,20 +3,20 @@ import { getCurrentWebview } from '@tauri-apps/api/webview';
 
 document.body.classList.add('bandcamp-controls');
 document.querySelector('#app').innerHTML = `
-  <h2>Verifica Bandcamp</h2>
+  <h2>Bandcamp verification</h2>
   <p id="query" class="hint"></p>
-  <p class="instructions">Completa l’eventuale verifica nella pagina a destra. Appena i risultati sono pronti, verranno trasferiti e questa finestra si chiuderà automaticamente. Chiudere prima annulla la ricerca.</p>
-  <button id="use-all-results" type="button">Usa tutti i risultati</button>
+  <p class="instructions">Complete any verification on the page to the right. When results are ready, they will be transferred and this window will close automatically. Closing it earlier cancels the search.</p>
+  <button id="use-all-results" type="button">Use all results</button>
   <div class="verification-buttons">
-    <button id="refresh-results" type="button">Aggiorna risultati</button>
-    <button id="return-search" type="button">Torna alla ricerca</button>
+    <button id="refresh-results" type="button">Refresh results</button>
+    <button id="return-search" type="button">Return to search</button>
   </div>
-  <p id="verification-status" role="status" aria-live="polite">Caricamento Bandcamp…</p>
-  <ul id="choices" aria-label="Risultati selezionabili"></ul>
-  <p id="selection-count" class="hint">Nessun risultato selezionato</p>
-  <button id="confirm-selection" type="button" disabled>Conferma selezione</button>
-  <p class="hint">Salva riferimenti di catalogo. Anteprima e file completo non ancora verificati.</p>
-  <button id="cancel-verification" type="button">Chiudi</button>`;
+  <p id="verification-status" role="status" aria-live="polite">Loading Bandcamp…</p>
+  <ul id="choices" aria-label="Selectable results"></ul>
+  <p id="selection-count" class="hint">No results selected</p>
+  <button id="confirm-selection" type="button" disabled>Confirm selection</button>
+  <p class="hint">Saves catalog references. Preview and full file not yet verified.</p>
+  <button id="cancel-verification" type="button">Close</button>`;
 
 const status = document.querySelector('#verification-status');
 const selected = new Set();
@@ -41,13 +41,13 @@ function render() {
       render();
     };
     const caption = document.createElement('span');
-    caption.textContent = `${track.title} — ${track.artist || 'Artista non indicato'}`;
+    caption.textContent = `${track.title} — ${track.artist || 'Unknown artist'}`;
     label.append(checkbox, caption);
     row.dataset.selected = String(checkbox.checked);
     row.append(label);
     return row;
   }));
-  document.querySelector('#selection-count').textContent = `${selected.size} selezionati su ${results.length}`;
+  document.querySelector('#selection-count').textContent = `${selected.size} selected out of ${results.length}`;
   document.querySelector('#confirm-selection').disabled = busy || !selected.size;
   document.querySelector('#refresh-results').disabled = busy;
   document.querySelector('#return-search').disabled = busy;
@@ -57,11 +57,11 @@ function render() {
 function pick(url, hint = null) {
   const resultUrl = hint?.link_url === url ? hint.result_url : url;
   if (!results.some(track => track.url === resultUrl)) {
-    status.textContent = 'Il collegamento cliccato non identifica un brano dell’elenco. Seleziona la casella accanto al titolo nel pannello.';
+    status.textContent = 'The clicked link does not identify a track in the list. Select the checkbox next to its title in the panel.';
     return;
   }
   selected.add(resultUrl);
-  status.textContent = 'Risultato selezionato. Premi «Conferma selezione» per salvarlo in SweatyDL.';
+  status.textContent = 'Result selected. Press «Confirm selection» to save it in SweatyDL.';
   render();
   const index = results.findIndex(track => track.url === resultUrl);
   document.querySelector('#choices').children[index]?.scrollIntoView({ block: 'nearest' });
@@ -83,7 +83,7 @@ async function context() {
 async function readResults() {
   if (busy) return;
   busy = true;
-  status.textContent = 'Lettura dei risultati Bandcamp…';
+  status.textContent = 'Reading Bandcamp results…';
   render();
   let readSucceeded = false;
   try {
@@ -98,8 +98,8 @@ async function readResults() {
       if (!results.some(track => track.url === url)) selected.delete(url);
     }
     status.textContent = results.length
-      ? `${results.length} risultati pronti. Scegli quelli che desideri e conferma.`
-      : 'Nessun brano o album selezionabile in questa pagina.';
+      ? `${results.length} results ready. Choose the ones you want and confirm.`
+      : 'No selectable tracks or albums on this page.';
   } catch (error) {
     // No stale choices may be confirmed after a failed refresh or a new query.
     results = [];
@@ -126,11 +126,11 @@ document.querySelector('#use-all-results').onclick = async () => {
   if (busy) return;
   busy = true;
   pendingPick = null;
-  status.textContent = 'Lettura e trasferimento dei risultati Bandcamp…';
+  status.textContent = 'Reading and transferring Bandcamp results…';
   render();
   try {
     const count = await invoke('use_bandcamp_results');
-    status.textContent = `${count} risultati trasferiti. Scegli quali salvare nella finestra principale.`;
+    status.textContent = `${count} results transferred. Choose which ones to save in the main window.`;
   } catch (error) {
     selected.clear();
     results = [];
@@ -153,7 +153,7 @@ document.querySelector('#return-search').onclick = async () => {
   render();
   try {
     await invoke('return_bandcamp_search');
-    status.textContent = 'Ricerca riaperta. Attendi il caricamento, poi aggiorna i risultati.';
+    status.textContent = 'Search reopened. Wait for it to load, then refresh the results.';
   } catch (error) { status.textContent = String(error); }
 };
 document.querySelector('#confirm-selection').onclick = async () => {
@@ -162,7 +162,7 @@ document.querySelector('#confirm-selection').onclick = async () => {
   render();
   try {
     const count = await invoke('confirm_bandcamp', { selectedUrls: [...selected], generation });
-    status.textContent = `${count} risultati confermati. Li trovi nella selezione della finestra principale.`;
+    status.textContent = `${count} results confirmed. You can find them in the selection in the main window.`;
   } catch (error) { status.textContent = String(error); }
   finally {
     busy = false;
@@ -204,7 +204,7 @@ async function start() {
     if (busy) resetPending = true; else if (!automatic) void readResults();
     render();
   });
-  if (automatic) status.textContent = 'Attendo la verifica e il caricamento dei risultati…';
+  if (automatic) status.textContent = 'Waiting for verification and results to load…';
   else await readResults();
 }
-start().catch(error => { status.textContent = `Collegamento Bandcamp non disponibile: ${error}`; });
+start().catch(error => { status.textContent = `Bandcamp connection unavailable: ${error}`; });

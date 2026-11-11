@@ -177,11 +177,11 @@ pub fn initialize(app: &tauri::AppHandle) {
         app.path().app_log_dir()
     };
     let Ok(directory) = directory else {
-        eprintln!("SweatyDL: directory log non disponibile");
+        eprintln!("SweatyDL: log directory unavailable");
         return;
     };
     if fs::create_dir_all(&directory).is_err() {
-        eprintln!("SweatyDL: impossibile creare directory log");
+        eprintln!("SweatyDL: unable to create log directory");
         return;
     }
     let _ = LOGGER.set(Logger {
@@ -215,7 +215,7 @@ pub fn event(level: &str, component: &str, request: &str, name: &str, details: V
             .write(level, component, request, name, details)
             .is_err()
         {
-            eprintln!("SweatyDL: scrittura log non riuscita");
+            eprintln!("SweatyDL: failed to write log");
         }
     }
 }
@@ -349,7 +349,7 @@ pub fn diagnostic_event(
         || request_id.len() > 100
         || details.to_string().len() > 16384
     {
-        return Err("Evento diagnostico non valido.".into());
+        return Err("Invalid diagnostic event.".into());
     }
     event(&level, "frontend", &request_id, &event_name, details);
     Ok(())
@@ -360,9 +360,9 @@ pub fn diagnostic_report(webview: Webview) -> Result<Value, String> {
     crate::require_local(&webview, false)?;
     let logger = LOGGER
         .get()
-        .ok_or("Log non disponibile: controlla i permessi della cartella del progetto.")?;
-    let _guard = logger.lock.lock().map_err(|_| "Log occupato.")?;
-    let text = fs::read_to_string(&logger.path).map_err(|_| "Impossibile leggere il log.")?;
+        .ok_or("Log unavailable: check the project folder permissions.")?;
+    let _guard = logger.lock.lock().map_err(|_| "Log busy.")?;
+    let text = fs::read_to_string(&logger.path).map_err(|_| "Unable to read the log.")?;
     let lines = text
         .lines()
         .rev()
@@ -380,7 +380,7 @@ pub fn diagnostic_report(webview: Webview) -> Result<Value, String> {
 #[tauri::command]
 pub fn show_log_directory(webview: Webview) -> Result<(), String> {
     crate::require_local(&webview, false)?;
-    let logger = LOGGER.get().ok_or("Log non disponibile.")?;
+    let logger = LOGGER.get().ok_or("Log unavailable.")?;
     let directory = logger.path.parent().unwrap();
     #[cfg(target_os = "macos")]
     let mut command = std::process::Command::new("/usr/bin/open");
@@ -391,7 +391,7 @@ pub fn show_log_directory(webview: Webview) -> Result<(), String> {
     command
         .arg(directory)
         .spawn()
-        .map_err(|_| "Impossibile mostrare la cartella dei log.")?;
+        .map_err(|_| "Unable to show the log folder.")?;
     Ok(())
 }
 

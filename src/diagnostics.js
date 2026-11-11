@@ -27,8 +27,8 @@ export function createLoggedInvoker(invoke, record = recordDiagnostic, makeId = 
       report('ipc_failed', { command, elapsed_ms: Date.now() - started,
         error: String(error), stack: error?.stack }, 'error', id);
       // Native errors are user-facing messages. Never display a raw arbitrary Error object.
-      const message = typeof error === 'string' ? error : 'Operazione non riuscita. Consulta il log.';
-      throw message.includes('[rif. ') ? message : `${message} [rif. ${id}]`;
+      const message = typeof error === 'string' ? error : 'Operation failed. Check the log.';
+      throw message.includes('[ref. ') ? message : `${message} [ref. ${id}]`;
     }
   };
 }
@@ -40,24 +40,24 @@ export function initDiagnostics(document, record = recordDiagnostic) {
   const content = document.querySelector('#diagnostic-content');
   document.querySelector('#show-diagnostics').onclick = async () => {
     dialog.showModal();
-    status.textContent = 'Caricamento log…'; content.value = '';
+    status.textContent = 'Loading log…'; content.value = '';
     try {
       const report = await nativeInvoke('diagnostic_report');
-      status.textContent = `${report.path} · Sessione ${report.session}`;
-      content.value = report.text || 'Nessun evento registrato.';
-    } catch { status.textContent = 'Log non disponibile. Avvia l’app Tauri e controlla i permessi della cartella.'; }
+      status.textContent = `${report.path} · Session ${report.session}`;
+      content.value = report.text || 'No events recorded.';
+    } catch { status.textContent = 'Log unavailable. Launch the Tauri app and check the folder permissions.'; }
   };
   document.querySelector('#close-diagnostics').onclick = () => dialog.close();
   document.querySelector('#copy-diagnostics').onclick = async () => {
     try {
       if (globalThis.navigator?.clipboard?.writeText) await navigator.clipboard.writeText(content.value);
       else { content.focus(); content.select(); if (!document.execCommand('copy')) throw new Error(); }
-      status.textContent = 'Diagnostica copiata.';
-    } catch { content.focus(); content.select(); status.textContent = 'Testo selezionato: premi ⌘C oppure Ctrl+C per copiarlo.'; }
+      status.textContent = 'Diagnostics copied.';
+    } catch { content.focus(); content.select(); status.textContent = 'Text selected: press ⌘C or Ctrl+C to copy it.'; }
   };
   document.querySelector('#open-log-folder').onclick = async () => {
     try { await nativeInvoke('show_log_directory'); }
-    catch { status.textContent = 'Impossibile aprire la cartella dei log.'; }
+    catch { status.textContent = 'Unable to open the log folder.'; }
   };
   globalThis.addEventListener?.('error', event => {
     void record('javascript_error', { message: event.message, file: event.filename,

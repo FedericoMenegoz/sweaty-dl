@@ -1,13 +1,13 @@
 export function catalogReference(raw) {
-  if (typeof raw !== 'string' || raw.length > 8192 || /[\u0000-\u0020\u007f]/.test(raw)) throw new Error('URL non valido');
+  if (typeof raw !== 'string' || raw.length > 8192 || /[\u0000-\u0020\u007f]/.test(raw)) throw new Error('Invalid URL');
   const url = new URL(raw);
   if (url.protocol !== 'https:' || url.username || url.password || url.port
     || !url.hostname.includes('.') || /^[\d.]+$/.test(url.hostname) || url.hostname.includes(':')
-    || /\.(local|localhost|internal)$/.test(url.hostname)) throw new Error('URL HTTPS pubblico richiesto');
+    || /\.(local|localhost|internal)$/.test(url.hostname)) throw new Error('A public HTTPS URL is required');
   url.hash = '';
   let source = 'URL';
   if (url.hostname.endsWith('.bandcamp.com') || url.hostname === 'bandcamp.com') {
-    if (!/^\/(track|album)\/[^/]+\/?$/.test(url.pathname)) throw new Error('Collegamento a brano o album richiesto');
+    if (!/^\/(track|album)\/[^/]+\/?$/.test(url.pathname)) throw new Error('A track or album link is required');
     source = 'Bandcamp'; url.search = ''; url.pathname = url.pathname.replace(/\/$/, '');
   } else if (['youtube.com', 'www.youtube.com', 'music.youtube.com', 'youtu.be'].includes(url.hostname)) source = 'YouTube';
   else if (['soundcloud.com', 'www.soundcloud.com'].includes(url.hostname)) source = 'SoundCloud';
@@ -16,9 +16,9 @@ export function catalogReference(raw) {
 }
 
 export function parseUrlText(text, existing = []) {
-  if (typeof text !== 'string' || text.length > 1024 * 1024) throw new Error('Il TXT deve contenere al massimo 1 MB.');
+  if (typeof text !== 'string' || text.length > 1024 * 1024) throw new Error('The TXT file must be no larger than 1 MB.');
   const lines = text.replace(/^\uFEFF/, '').split(/\r\n|\r|\n/);
-  if (lines.length > 10000) throw new Error('Il TXT deve contenere al massimo 10.000 righe.');
+  if (lines.length > 10000) throw new Error('The TXT file must contain no more than 10,000 lines.');
   const seen = new Set(existing.map(item => {
     try { return catalogReference(item.url).url; } catch { return item.url; }
   }));
@@ -33,7 +33,7 @@ export function parseUrlText(text, existing = []) {
       seen.add(track.url); added.push(track);
     } catch { invalid.push(index + 1); }
   });
-  if (existing.length + added.length > 2000) throw new Error('La selezione può contenere al massimo 2.000 voci.');
+  if (existing.length + added.length > 2000) throw new Error('The selection can contain no more than 2,000 items.');
   return { added, duplicates, invalid };
 }
 
@@ -63,44 +63,44 @@ export function initDownloads({ document, invoke, isTauri, getQueue, save, stopP
     const file = input.files?.[0];
     if (!file || busy) return;
     try {
-      if (file.size > 1024 * 1024) throw new Error('Il TXT deve contenere al massimo 1 MB.');
+      if (file.size > 1024 * 1024) throw new Error('The TXT file must be no larger than 1 MB.');
       const report = parseUrlText(await file.text(), getQueue());
       diagnose('txt_imported', { bytes: file.size, added: report.added.length, duplicates: report.duplicates, invalid_lines: report.invalid });
       getQueue().push(...report.added);
       const persisted = save();
-      message.textContent = `${report.added.length} URL aggiunti; ${report.duplicates} duplicati.${report.invalid.length ? ` Righe non valide: ${report.invalid.slice(0, 15).join(', ')}${report.invalid.length > 15 ? '…' : ''}.` : ''}${persisted === false ? ' Salvataggio della selezione non riuscito.' : ''}`;
+      message.textContent = `URLs added: ${report.added.length}; duplicates: ${report.duplicates}.${report.invalid.length ? ` Invalid lines: ${report.invalid.slice(0, 15).join(', ')}${report.invalid.length > 15 ? '…' : ''}.` : ''}${persisted === false ? ' Unable to save the selection.' : ''}`;
     } catch (error) { diagnose('txt_import_failed', { error: String(error) }, 'error'); message.textContent = error.message; }
     finally { input.value = ''; }
   };
   cancel.onclick = async () => {
     cancelled = true; cancel.disabled = true;
-    message.textContent = 'Annullamento in corso…';
+    message.textContent = 'Cancelling…';
     if (activeId) {
       try { await invoke('cancel_download', { requestId: activeId }); }
-      catch { message.textContent = 'Annullamento richiesto. Attendo la fine del trasferimento corrente…'; }
+      catch { message.textContent = 'Cancellation requested. Waiting for the current transfer to finish…'; }
     }
   };
   start.onclick = async () => {
     if (busy) return;
-    if (!canStart()) { message.textContent = 'Attendi la fine della ricerca prima di avviare il download.'; return; }
-    if (!isTauri()) { message.textContent = 'Avvia l’app Tauri per scaricare.'; return; }
+    if (!canStart()) { message.textContent = 'Wait for the search to finish before starting the download.'; return; }
+    if (!isTauri()) { message.textContent = 'Launch the Tauri app to download.'; return; }
     const pending = getQueue().filter(track => track.downloadStatus !== 'done');
-    if (!pending.length) { message.textContent = 'Aggiungi prima dei brani alla selezione o importa un TXT.'; return; }
+    if (!pending.length) { message.textContent = 'Add tracks to the selection or import a TXT file first.'; return; }
     busy = true; cancelled = false; cancel.disabled = false; update(); stopPreview();
     let completed = 0, failed = 0;
     try {
       if (!destination.value.trim()) destination.value = await invoke('download_directory');
-      if (cancelled) { message.textContent = 'Coda interrotta.'; return; }
+      if (cancelled) { message.textContent = 'Queue stopped.'; return; }
       try { storage.setItem('sweatydl-next-destination', destination.value.trim()); } catch { /* optional preference */ }
       for (const [index, track] of pending.entries()) {
         if (cancelled) break;
         activeId = `download-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
         track.downloadStatus = 'running'; delete track.downloadError; save(); update();
         progress.hidden = false; progress.removeAttribute('value');
-        message.textContent = `${index + 1}/${pending.length} · ${track.title} · Preparazione…`;
+        message.textContent = `${index + 1}/${pending.length} · ${track.title} · Preparing…`;
         try {
           const result = await invoke('download_audio', { url: track.url, destination: destination.value.trim(), requestId: activeId });
-          if (!Array.isArray(result.files) || !result.files.length) throw new Error('Nessun file confermato.');
+          if (!Array.isArray(result.files) || !result.files.length) throw new Error('No files confirmed.');
           track.downloadStatus = 'done'; track.downloadFiles = result.files;
           completed++; progress.value = 1;
           // Keep a bounded, local history; never store resolved stream URLs.
@@ -115,7 +115,7 @@ export function initDownloads({ document, invoke, isTauri, getQueue, save, stopP
           track.downloadError = cancelled ? '' : String(error).slice(0, 500); failed += cancelled ? 0 : 1;
         } finally { activeId = null; save(); update(); }
       }
-      message.textContent = `${cancelled ? 'Coda interrotta. ' : ''}${completed} voci scaricate; ${failed} errori.${failed ? ' Premi Scarica per riprovare le voci fallite.' : ''}`;
+      message.textContent = `${cancelled ? 'Queue stopped. ' : ''}Downloaded: ${completed}; errors: ${failed}.${failed ? ' Press Download to retry failed items.' : ''}`;
     } catch (error) { message.textContent = String(error); }
     finally { activeId = null; busy = false; progress.hidden = true; update(); }
   };
@@ -124,7 +124,7 @@ export function initDownloads({ document, invoke, isTauri, getQueue, save, stopP
     if (typeof payload.progress === 'number') progress.value = payload.progress;
     else progress.removeAttribute('value');
     const track = getQueue().find(item => item.downloadStatus === 'running');
-    message.textContent = `${track?.title || 'Audio'} · ${payload.total ? `Brano ${payload.index}/${payload.total} · ` : ''}${typeof payload.progress === 'number' ? `${Math.round(payload.progress * 100)}%` : 'Download in corso…'}`;
+    message.textContent = `${track?.title || 'Audio'} · ${payload.total ? `Track ${payload.index}/${payload.total} · ` : ''}${typeof payload.progress === 'number' ? `${Math.round(payload.progress * 100)}%` : 'Downloading…'}`;
   }).catch(() => { /* Final command response remains authoritative. */ });
   return { busy: () => busy };
 }

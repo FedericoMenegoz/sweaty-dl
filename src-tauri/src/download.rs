@@ -24,7 +24,7 @@ struct Job {
 }
 
 pub fn validate_url(value: &str) -> Result<tauri::Url, String> {
-    let mut url = tauri::Url::parse(value).map_err(|_| "URL non valido.")?;
+    let mut url = tauri::Url::parse(value).map_err(|_| "Invalid URL.")?;
     let host = url.host_str().unwrap_or("");
     if value.len() > 8192
         || value.chars().any(char::is_control)
@@ -38,7 +38,7 @@ pub fn validate_url(value: &str) -> Result<tauri::Url, String> {
             .iter()
             .any(|suffix| host.ends_with(suffix))
     {
-        return Err("Inserisci un URL HTTPS pubblico senza credenziali.".into());
+        return Err("Enter a public HTTPS URL without credentials.".into());
     }
     url.set_fragment(None);
     Ok(url)
@@ -109,7 +109,7 @@ pub fn download_directory(webview: Webview) -> Result<String, String> {
     let path = webview
         .path()
         .download_dir()
-        .map_err(|_| "Cartella Download non disponibile.")?
+        .map_err(|_| "Downloads folder unavailable.")?
         .join("SweatyDL");
     Ok(path.to_string_lossy().into())
 }
@@ -141,13 +141,12 @@ pub async fn choose_download_directory(webview: Webview) -> Result<Option<String
                 });
                 let _ = tx.send(result);
             })
-            .map_err(|_| "Impossibile aprire la scelta della cartella.")?;
-        rx.await
-            .map_err(|_| "Scelta della cartella interrotta.".into())
+            .map_err(|_| "Unable to open the folder picker.")?;
+        rx.await.map_err(|_| "Folder selection interrupted.".into())
     }
     #[cfg(not(target_os = "macos"))]
     {
-        Err("Indica il percorso nel campo Cartella di destinazione.".into())
+        Err("Enter the path in the Destination folder field.".into())
     }
 }
 
@@ -156,7 +155,7 @@ pub async fn cancel_download(webview: Webview, request_id: String) -> Result<(),
     require_local(&webview, false)?;
     {
         let state = webview.state::<DownloadState>();
-        let active = state.0.lock().map_err(|_| "Download non disponibile.")?;
+        let active = state.0.lock().map_err(|_| "Download unavailable.")?;
         if let Some(job) = active.as_ref().filter(|j| j.id == request_id) {
             job.cancel();
         }
@@ -167,7 +166,7 @@ pub async fn cancel_download(webview: Webview, request_id: String) -> Result<(),
 fn run_worker(app: tauri::AppHandle, job: Arc<Job>, mut payload: Value) -> Result<Value, String> {
     let result = (|| {
         if job.cancelled.load(Ordering::Relaxed) {
-            return Err("Download annullato.".into());
+            return Err("Download cancelled.".into());
         }
         diag::event(
             "info",
@@ -179,23 +178,23 @@ fn run_worker(app: tauri::AppHandle, job: Arc<Job>, mut payload: Value) -> Resul
         let destination = Path::new(
             payload["destination"]
                 .as_str()
-                .ok_or("Destinazione non valida.")?,
+                .ok_or("Invalid destination.")?,
         );
         if !destination.is_absolute() {
-            return Err("Inserisci un percorso di destinazione assoluto.".into());
+            return Err("Enter an absolute destination path.".into());
         }
         std::fs::create_dir_all(destination).map_err(|error| {
             diag::io_failure("download", &job.id, "destination_create_failed", &error);
-            "Non posso creare la cartella di destinazione."
+            "Unable to create the destination folder."
         })?;
         let destination = destination.canonicalize().map_err(|error| {
             diag::io_failure("download", &job.id, "destination_resolve_failed", &error);
-            "Destinazione non disponibile."
+            "Destination unavailable."
         })?;
         let temporary = destination.join(format!(".sweatydl-{}", job.id));
         std::fs::create_dir(&temporary).map_err(|error| {
             diag::io_failure("download", &job.id, "temporary_create_failed", &error);
-            "Non posso preparare i file temporanei nella destinazione."
+            "Unable to prepare temporary files in the destination."
         })?;
         *job.temporary.lock().unwrap() = Some(temporary.clone());
         payload["destination"] = json!(destination);
@@ -227,7 +226,7 @@ fn run_worker(app: tauri::AppHandle, job: Arc<Job>, mut payload: Value) -> Resul
                     "spawn_failed",
                     json!({"error": error.to_string(), "os_error": error.raw_os_error()}),
                 );
-                "Impossibile avviare il downloader nell’ambiente Python di sviluppo."
+                "Unable to start the downloader in the development Python environment."
             })?;
         let stdout = child.stdout.take().unwrap();
         let stderr_reader = diag::capture_stderr(
@@ -256,7 +255,7 @@ fn run_worker(app: tauri::AppHandle, job: Arc<Job>, mut payload: Value) -> Resul
             "{}",
             payload
         )
-        .map_err(|_| "Avvio del trasferimento non riuscito.")?;
+        .map_err(|_| "Failed to start the transfer.")?;
         let result = observe_worker(&job, stdout, Duration::from_secs(30 * 60), |event| {
             let _ = app.emit_to("main", "download-progress", event);
         });
@@ -297,16 +296,16 @@ fn observe_worker(
         if job.cancelled.load(Ordering::Relaxed) {
             let at = cancel_at.get_or_insert_with(Instant::now);
             if at.elapsed() > Duration::from_secs(2) {
-                break Err("Download annullato.".into());
+                break Err("Download cancelled.".into());
             }
         }
         if Instant::now() >= deadline {
-            break Err("Download scaduto dopo 30 minuti. Puoi riprovare dalla coda.".into());
+            break Err("Download timed out after 30 minutes. You can retry from the queue.".into());
         }
         match rx.recv_timeout(Duration::from_millis(100)) {
             Ok(line) => {
                 let Ok(value) = serde_json::from_str::<Value>(&line) else {
-                    break Err("Risposta del downloader non valida.".into());
+                    break Err("Invalid downloader response.".into());
                 };
                 match value["type"].as_str() {
                     Some("progress") => {
@@ -346,18 +345,18 @@ fn observe_worker(
                         error = Some(
                             value["message"]
                                 .as_str()
-                                .unwrap_or("Download non riuscito.")
+                                .unwrap_or("Download failed.")
                                 .chars()
                                 .take(500)
                                 .collect::<String>(),
                         )
                     }
-                    _ => break Err("Risposta del downloader non valida.".into()),
+                    _ => break Err("Invalid downloader response.".into()),
                 }
             }
             Err(mpsc::RecvTimeoutError::Disconnected) => {
                 if job.cancelled.load(Ordering::Relaxed) {
-                    break Err("Download annullato.".into());
+                    break Err("Download cancelled.".into());
                 }
                 let status = job
                     .child
@@ -366,7 +365,7 @@ fn observe_worker(
                     .as_mut()
                     .unwrap()
                     .try_wait()
-                    .map_err(|_| "Il downloader si è interrotto.")?;
+                    .map_err(|_| "The downloader stopped unexpectedly.")?;
                 let Some(status) = status else {
                     std::thread::sleep(Duration::from_millis(100));
                     continue;
@@ -380,9 +379,9 @@ fn observe_worker(
                 );
                 let success = status.success();
                 break if success {
-                    completed.ok_or_else(|| "Nessun file confermato dal downloader.".into())
+                    completed.ok_or_else(|| "No files confirmed by the downloader.".into())
                 } else {
-                    Err(error.unwrap_or_else(|| "Download non riuscito.".into()))
+                    Err(error.unwrap_or_else(|| "Download failed.".into()))
                 };
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {}
@@ -403,11 +402,11 @@ pub async fn download_audio(
 ) -> Result<Value, String> {
     require_local(&webview, false)?;
     if !cfg!(debug_assertions) && !cfg!(feature = "bundled-backend") {
-        return Err("Il downloader autonomo per la distribuzione non è ancora configurato.".into());
+        return Err("The standalone downloader for distribution is not configured yet.".into());
     }
     let url = validate_url(&url)?;
     if !valid_id(&request_id) || destination.len() > 4096 || destination.contains('\0') {
-        return Err("Richiesta di download non valida.".into());
+        return Err("Invalid download request.".into());
     }
     let mut trace = diag::Span::new(
         "download",
@@ -422,9 +421,9 @@ pub async fn download_audio(
     });
     {
         let state = webview.state::<DownloadState>();
-        let mut active = state.0.lock().map_err(|_| "Downloader occupato.")?;
+        let mut active = state.0.lock().map_err(|_| "Downloader busy.")?;
         if active.is_some() {
-            return Err("Un download è già in corso.".into());
+            return Err("A download is already in progress.".into());
         }
         *active = Some(job.clone());
     }
@@ -447,13 +446,13 @@ pub async fn download_audio(
             payload["tracks"] = media["tracks"].clone();
         }
         if job.cancelled.load(Ordering::Relaxed) {
-            return Err("Download annullato.".into());
+            return Err("Download cancelled.".into());
         }
         let app = webview.app_handle().clone();
         let task_job = job.clone();
         tauri::async_runtime::spawn_blocking(move || run_worker(app, task_job, payload))
             .await
-            .map_err(|_| "Il downloader si è interrotto.".to_string())?
+            .map_err(|_| "The downloader stopped unexpectedly.".to_string())?
     }
     .await;
     trace.finish(&result);
@@ -462,7 +461,7 @@ pub async fn download_audio(
     if let Ok(mut active) = state.0.lock() {
         *active = None;
     }
-    result.map_err(|error| format!("{error} [rif. {request_id}]"))
+    result.map_err(|error| format!("{error} [ref. {request_id}]"))
 }
 
 #[cfg(test)]
@@ -530,7 +529,7 @@ mod tests {
         assert!(
             observe_worker(&job, stdout, Duration::from_millis(50), |_| {})
                 .unwrap_err()
-                .contains("scaduto")
+                .contains("timed out")
         );
         assert!(start.elapsed() < Duration::from_secs(3));
         assert!(!path.exists());
@@ -543,7 +542,7 @@ mod tests {
         job.cancel();
         assert!(observe_worker(&job, stdout, Duration::from_secs(5), |_| {})
             .unwrap_err()
-            .contains("annullato"));
+            .contains("cancelled"));
     }
     #[test]
     fn accepts_mixed_public_sources_and_keeps_exact_version() {

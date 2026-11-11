@@ -7,7 +7,7 @@ def provider_for_url(url):
     from urllib.parse import parse_qs
     host = (parsed.hostname or '').lower()
     if parsed.scheme != 'https' or parsed.username or parsed.password or parsed.port not in (None, 443):
-        raise ValueError(f'URL HTTPS non valido: {url}')
+        raise ValueError(f'Invalid HTTPS URL: {url}')
     parts = [p for p in parsed.path.split('/') if p]
     if host.endswith('.bandcamp.com') and len(parts) == 2 and parts[0] in ('track', 'album'):
         return 'Bandcamp'
@@ -20,5 +20,5 @@ def provider_for_url(url):
             return 'YouTube'
     if host == 'youtu.be' and len(parts) == 1:
         return 'YouTube'
-    raise ValueError(f'Inserisci un link a un brano Bandcamp, SoundCloud o YouTube: {url}')
+    raise ValueError(f'Enter a link to a Bandcamp, SoundCloud, or YouTube track: {url}')
 

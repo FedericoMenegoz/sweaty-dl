@@ -28,7 +28,7 @@ pub fn allowed_navigation(url: &Url) -> bool {
 
 pub fn search_url(query: &str) -> Result<Url, String> {
     if query.trim().is_empty() || query.chars().count() > 1001 {
-        return Err("Ricerca Bandcamp non valida.".into());
+        return Err("Invalid Bandcamp search.".into());
     }
     let mut url = Url::parse("https://bandcamp.com/search").unwrap();
     url.query_pairs_mut()
@@ -65,8 +65,7 @@ pub fn matches_search(url: &Url, expected: &Url) -> bool {
 }
 
 pub fn catalog_url(value: &str) -> Result<Url, String> {
-    let mut url =
-        Url::parse(value).map_err(|_| "URL risultato Bandcamp non valido.".to_string())?;
+    let mut url = Url::parse(value).map_err(|_| "Invalid Bandcamp result URL.".to_string())?;
     let host = url.host_str().unwrap_or("");
     if value.len() > 8192
         || url.scheme() != "https"
@@ -78,7 +77,7 @@ pub fn catalog_url(value: &str) -> Result<Url, String> {
             .iter()
             .any(|prefix| url.path().starts_with(prefix) && url.path().len() > prefix.len())
     {
-        return Err("La pagina contiene un collegamento Bandcamp non valido.".into());
+        return Err("The page contains an invalid Bandcamp link.".into());
     }
     url.set_query(None);
     url.set_fragment(None);
@@ -87,18 +86,18 @@ pub fn catalog_url(value: &str) -> Result<Url, String> {
 
 pub fn selected_report(report: &Value, selected: &[String]) -> Result<Value, String> {
     if selected.is_empty() || selected.len() > 100 {
-        return Err("Seleziona almeno un risultato da confermare.".into());
+        return Err("Select at least one result to confirm.".into());
     }
     let rows = report["results"]
         .as_array()
-        .ok_or("Leggi prima i risultati Bandcamp.")?;
+        .ok_or("Read the Bandcamp results first.")?;
     let mut results = Vec::new();
     let mut seen = std::collections::HashSet::new();
     for url in selected {
         let row = rows
             .iter()
             .find(|row| row["url"].as_str() == Some(url))
-            .ok_or("La selezione non appartiene ai risultati letti. Aggiorna i risultati.")?;
+            .ok_or("The selection does not match the results read. Refresh the results.")?;
         if seen.insert(url) {
             results.push(row.clone());
         }
@@ -131,54 +130,51 @@ fn text<'a>(value: &'a Value, key: &str, max: usize) -> Result<&'a str, String> 
         .get(key)
         .and_then(Value::as_str)
         .filter(|s| s.chars().count() <= max)
-        .ok_or_else(|| "Risultati Bandcamp non validi o troppo grandi.".into())
+        .ok_or_else(|| "Bandcamp results are invalid or too large.".into())
 }
 
 pub fn validate_snapshot(raw: &str, expected: &Url) -> Result<Value, String> {
     if raw.len() > MAX_SNAPSHOT_BYTES {
-        return Err("La pagina Bandcamp contiene troppi dati da importare.".into());
+        return Err("The Bandcamp page contains too much data to import.".into());
     }
-    let mut snapshot: Value = serde_json::from_str(raw)
-        .map_err(|_| "Impossibile leggere la pagina Bandcamp.".to_string())?;
+    let mut snapshot: Value =
+        serde_json::from_str(raw).map_err(|_| "Unable to read the Bandcamp page.".to_string())?;
     // A string result is portable across WebKit/WebView2; also accept the
     // previous direct-object callback representation.
     if let Some(serialized) = snapshot.as_str() {
         snapshot = serde_json::from_str(serialized)
-            .map_err(|_| "Risposta Bandcamp non leggibile.".to_string())?;
+            .map_err(|_| "Unreadable Bandcamp response.".to_string())?;
     }
     if snapshot.get("error").is_some() {
-        return Err(
-            "Lettura della pagina Bandcamp non riuscita. Aggiorna i risultati e riprova.".into(),
-        );
+        return Err("Failed to read the Bandcamp page. Refresh the results and try again.".into());
     }
     let url = Url::parse(text(&snapshot, "url", 8192)?)
-        .map_err(|_| "URL Bandcamp non valido.".to_string())?;
+        .map_err(|_| "Invalid Bandcamp URL.".to_string())?;
     if !matches_search(&url, expected) {
         return Err(
-            "La pagina Bandcamp è cambiata durante la lettura. Riprova da quella visualizzata."
-                .into(),
+            "The Bandcamp page changed while reading. Try again from the displayed page.".into(),
         );
     }
     if snapshot.get("challenge").and_then(Value::as_bool) == Some(true) {
         return Err(
-            "La verifica Bandcamp è ancora presente. Completala nella finestra dedicata.".into(),
+            "Bandcamp verification is still present. Complete it in the dedicated window.".into(),
         );
     }
     if snapshot.get("recognized").and_then(Value::as_bool) != Some(true) {
-        return Err("Pagina Bandcamp non riconosciuta: nessun risultato importato.".into());
+        return Err("Unrecognized Bandcamp page: no results imported.".into());
     }
     let rows = snapshot
         .get("results")
         .and_then(Value::as_array)
         .filter(|rows| rows.len() <= 100)
-        .ok_or_else(|| "Troppi risultati Bandcamp o risposta non valida.".to_string())?;
+        .ok_or_else(|| "Too many Bandcamp results or invalid response.".to_string())?;
     let mut results = Vec::new();
     let mut seen = std::collections::HashSet::new();
     for row in rows {
         let title = text(row, "title", 500)?.trim();
         let artist = text(row, "artist", 500)?.trim();
         if title.is_empty() {
-            return Err("Un risultato Bandcamp non ha un titolo valido.".into());
+            return Err("A Bandcamp result has an invalid title.".into());
         }
         let track_url = catalog_url(text(row, "url", 4096)?)?;
         if seen.insert(track_url.to_string()) {
@@ -283,7 +279,7 @@ mod tests {
         page["challenge"] = json!(true);
         assert!(validate_snapshot(&page.to_string(), &expected)
             .unwrap_err()
-            .contains("verifica"));
+            .contains("verification"));
         page["challenge"] = json!(false);
         page["recognized"] = json!(false);
         assert!(validate_snapshot(&page.to_string(), &expected).is_err());

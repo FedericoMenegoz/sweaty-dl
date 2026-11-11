@@ -50,13 +50,13 @@ async function panel(load, transfer = async () => { throw new Error('Unexpected 
 test('a browser click does not replace an import error with an unrelated missing-link message', async () => {
   let fail = false;
   const view = await panel(async () => {
-    if (fail) throw new Error('La pagina è cambiata durante la lettura.');
+    if (fail) throw new Error('The page changed while reading.');
     return { session: 1, results: [track] };
   });
   fail = true;
   view.pick('https://artist.bandcamp.com/album/release');
   await tick();
-  assert.match(view.status(), /La pagina è cambiata durante la lettura/);
+  assert.match(view.status(), /The page changed while reading/);
   assert.equal(view.confirmDisabled(), true);
 });
 
@@ -69,7 +69,7 @@ test('a direct catalog click selects the matching validated row', async () => {
   view.pick(track.url);
   await tick();
   assert.equal(view.confirmDisabled(), false);
-  assert.match(view.status(), /Risultato selezionato/);
+  assert.match(view.status(), /Result selected/);
   assert.equal(reads, 1, 'a known row should not trigger another read during cancelled navigation');
 });
 
@@ -80,7 +80,7 @@ test('a cover click selects the row title returned by the validated hint', async
   view.pick(album);
   await tick();
   assert.equal(view.confirmDisabled(), false);
-  assert.match(view.status(), /Risultato selezionato/);
+  assert.match(view.status(), /Result selected/);
 });
 
 test('an unknown browser link never enables confirmation', async () => {
@@ -96,14 +96,14 @@ test('transfer-all works even with an empty sidebar and no individual selection'
   assert.equal(view.elements.get('#use-all-results').disabled, false);
   await view.elements.get('#use-all-results').onclick();
   assert.equal(transfers, 1);
-  assert.match(view.status(), /18 risultati trasferiti/);
+  assert.match(view.status(), /18 results transferred/);
 });
 
 test('transfer-all preserves the real read error', async () => {
   const view = await panel(async () => ({ session: 1, results: [track] }),
-    async () => { throw new Error('La verifica Bandcamp è ancora presente.'); });
+    async () => { throw new Error('Bandcamp verification is still present.'); });
   await view.elements.get('#use-all-results').onclick();
-  assert.match(view.status(), /La verifica Bandcamp è ancora presente/);
+  assert.match(view.status(), /Bandcamp verification is still present/);
   assert.equal(view.confirmDisabled(), true);
 });
 
@@ -111,7 +111,7 @@ test('automatic verification panel waits for the core without starting a second 
   let reads = 0;
   const view = await panel(async () => { reads++; return { results: [] }; }, undefined, true);
   assert.equal(reads, 0);
-  assert.match(view.status(), /Attendo la verifica/);
-  view.autoStatus('Bandcamp richiede la verifica manuale.');
-  assert.match(view.status(), /verifica manuale/);
+  assert.match(view.status(), /Waiting for verification/);
+  view.autoStatus('Bandcamp requires manual verification.');
+  assert.match(view.status(), /manual verification/);
 });

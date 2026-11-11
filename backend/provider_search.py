@@ -62,7 +62,7 @@ def parse_bandcamp(html):
     soup = BeautifulSoup(html, 'html.parser')
     title = soup.title.get_text(' ', strip=True).casefold() if soup.title else ''
     if title == 'client challenge' or 'JavaScript is disabled in your browser' in soup.get_text(' ', strip=True):
-        raise BandcampChallenge('Bandcamp richiede una verifica nel browser.')
+        raise BandcampChallenge('Bandcamp requires browser verification.')
     results = []
     for item in soup.select('.searchresult'):
         anchor = item.select_one('.heading a')
@@ -86,7 +86,7 @@ def parse_bandcamp(html):
             artwork=urljoin('https://bandcamp.com', image.get('src', '')) if image else ''))
     if not soup.select_one('.searchresults, .result-items, .searchresult, .no-results, .noresults'):
         # A consent page, bot challenge, or changed markup is not an empty search.
-        raise SearchError('Pagina Bandcamp non riconosciuta; riprova o apri il sito.')
+        raise SearchError('Unrecognized Bandcamp page; try again or open the site.')
     return results
 
 
@@ -98,14 +98,14 @@ def bandcamp_search(query):
         response.raise_for_status()
         return parse_bandcamp(response.text)
     except requests.RequestException as error:
-        raise SearchError(f'Bandcamp non raggiungibile: {error}') from error
+        raise SearchError(f'Unable to reach Bandcamp: {error}') from error
 
 
 def ytdlp_search(source, query):
     try:
         from yt_dlp import YoutubeDL
     except ImportError as error:
-        raise SearchError('Componente yt-dlp non disponibile in questa installazione.') from error
+        raise SearchError('The yt-dlp component is unavailable in this installation.') from error
     prefix = {'SoundCloud': 'scsearch8', 'YouTube': 'ytsearch8'}[source]
     try:
         from runtime_tools import javascript_options
@@ -114,7 +114,7 @@ def ytdlp_search(source, query):
                         'skip_download': True, **javascript_options()}) as downloader:
             info = downloader.extract_info(f'{prefix}:{query}', download=False)
         if not info:
-            raise SearchError(f'{source}: risposta vuota dal servizio.')
+            raise SearchError(f'{source}: empty response from the service.')
         results = []
         for entry in info.get('entries') or []:
             if not entry:
@@ -129,7 +129,7 @@ def ytdlp_search(source, query):
             except ValueError:
                 continue
             thumbnails = entry.get('thumbnails') or []
-            results.append(Result(entry.get('title') or 'Senza titolo',
+            results.append(Result(entry.get('title') or 'Untitled',
                                   entry.get('artist') or entry.get('uploader') or entry.get('channel') or '',
                                   url, source, artwork=entry.get('thumbnail') or
                                   (thumbnails[-1].get('url', '') if thumbnails else ''),
@@ -144,7 +144,7 @@ def ytdlp_search(source, query):
 def search_tracks(title, artist='', mode='auto', notify=lambda _: None, providers=None):
     title, artist = title.strip(), artist.strip()
     if not title:
-        raise ValueError('Inserisci il titolo del brano.')
+        raise ValueError('Enter the track title.')
     providers = providers or {'Bandcamp': bandcamp_search,
                               'SoundCloud': lambda q: ytdlp_search('SoundCloud', q),
                               'YouTube': lambda q: ytdlp_search('YouTube', q)}
@@ -155,7 +155,7 @@ def search_tracks(title, artist='', mode='auto', notify=lambda _: None, provider
                'YouTube': ['YouTube']}[mode]
     query = ' '.join(part for part in (artist, title) if part)
     for source in sources:
-        notify(f'Ricerca su {source}…')
+        notify(f'Searching {source}…')
         report.searched.append(source)
         try:
             found = providers[source](query)

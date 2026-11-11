@@ -24,20 +24,20 @@ pub(crate) fn development_python() -> PathBuf {
 
 pub fn backend_command(app: &tauri::AppHandle, operation: &str) -> Result<Command, String> {
     if !["search", "download"].contains(&operation) {
-        return Err("Operazione backend non valida.".into());
+        return Err("Invalid backend operation.".into());
     }
     if cfg!(feature = "bundled-backend") {
         let resources = app
             .path()
             .resource_dir()
-            .map_err(|_| "Risorse dell’app non disponibili.")?;
+            .map_err(|_| "App resources unavailable.")?;
         let binary = resources.join("backend").join(if cfg!(windows) {
             "sweatydl-backend.exe"
         } else {
             "sweatydl-backend"
         });
         if !binary.is_file() {
-            return Err("Backend incluso non trovato. Ricostruisci il pacchetto completo.".into());
+            return Err("Bundled backend not found. Rebuild the full package.".into());
         }
         let mut command = Command::new(binary);
         command.arg(format!("--{operation}"));
@@ -49,7 +49,7 @@ pub fn backend_command(app: &tauri::AppHandle, operation: &str) -> Result<Comman
         return Ok(command);
     }
     if !cfg!(debug_assertions) {
-        return Err("Build senza backend autonomo: usa npm run deploy.".into());
+        return Err("Build has no standalone backend: use npm run deploy.".into());
     }
     let project = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let mut command = Command::new(development_python());
