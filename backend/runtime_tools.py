@@ -13,4 +13,6 @@ def tool(name):
 
 def javascript_options():
     node = tool('node')
-    return {'js_runtimes': {'node': {'path': node}}} if node else {}
+    # Omitting this option enables yt-dlp's default Deno discovery on PATH,
+    # including in frozen builds where only bundled tools should execute.
+    return {'js_runtimes': {'node': {'path': node}} if node else {}}

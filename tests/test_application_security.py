@@ -86,5 +86,18 @@ class PublicationSecurityTests(unittest.TestCase):
 
 
 
+class RuntimeDiscoverySecurityTests(unittest.TestCase):
+    def test_missing_bundled_runtime_does_not_enable_path_fallback(self):
+        from yt_dlp import YoutubeDL
+        with patch.object(sys, 'frozen', True, create=True), patch.object(
+                sys, '_MEIPASS', '/nonexistent-fixture-bundle', create=True), patch(
+                'shutil.which') as discover:
+            options = runtime_tools.javascript_options()
+            discover.assert_not_called()
+        with YoutubeDL({'quiet': True, **options}) as downloader:
+            self.assertEqual(downloader.params['js_runtimes'], {})
+
+
+
 if __name__ == '__main__':
     unittest.main()

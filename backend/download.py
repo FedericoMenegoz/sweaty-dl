@@ -19,9 +19,9 @@ try:
 except ModuleNotFoundError:
     import diagnostics as diag
 try:
-    from backend.runtime_tools import tool
+    from backend.runtime_tools import javascript_options, tool
 except ModuleNotFoundError:
-    from runtime_tools import tool
+    from runtime_tools import javascript_options, tool
 
 OUTPUT = sys.stdout
 CANCELLED = threading.Event()
@@ -266,9 +266,7 @@ def extracted_audio(url, temporary, destination):
         'noprogress': True, 'proxy': '', 'external_downloader': None,
         'postprocessors': [], 'fixup': 'never', 'hls_prefer_native': True,
     }
-    node = tool('node')
-    if node:
-        options['js_runtimes'] = {'node': {'path': node}}
+    options.update(javascript_options())
     original_redirect = RedirectHandler.redirect_request
 
     def redirect(handler, req, fp, code, msg, headers, newurl):
