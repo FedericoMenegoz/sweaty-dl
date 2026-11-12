@@ -22,6 +22,7 @@ Only download music you have permission to download. Respect artists' wishes and
 - **Import links:** Add multiple downloads from a `.txt` file containing one HTTPS URL per line.
 - **Import playlists:** Paste a SoundCloud or YouTube playlist link into the title/search field to add its tracks to your selection. Bandcamp album links use the existing album downloader.
 - **Keep everything local:** Save your selection locally and inspect diagnostic logs when something goes wrong.
+- **Update the app:** Install newer releases from the app, with your download queue saved before restarting.
 
 ### Audio quality and limitations
 
@@ -57,7 +58,7 @@ Apple Silicon and ARM builds are not currently configured.
 
 ## Download
 
-**[Download SweatyDL v0.1.0](https://github.com/FedericoMenegoz/sweaty-dl/releases/tag/v0.1.0)**
+**[Download the latest SweatyDL release](https://github.com/FedericoMenegoz/sweaty-dl/releases/latest)**
 
 SweatyDL is available for Windows, macOS, and Linux.
 
@@ -72,3 +73,5 @@ SweatyDL uses Tauri 2 for its desktop interface, Rust for native functionality, 
 To build it yourself, you'll need Node.js 22, Rust stable, Python 3.10–3.13, FFprobe, and the native development dependencies for your operating system.
 
 Follow the platform-specific instructions below to prepare your environment and create a distributable package.
+
+For automated build and release setup, see the [release guide](docs/releases.md).

@@ -41,6 +41,9 @@ class DeploymentTests(unittest.TestCase):
         for failure in (False, True):
             with self.subTest(failure=failure), tempfile.TemporaryDirectory() as directory:
                 output = Path(directory) / 'deployments'
+                stale = output / profile['name'] / 'verified-artifacts.json'
+                stale.parent.mkdir(parents=True)
+                stale.write_text('[{"file":"stale-package-from-another-run"}]')
                 with patch.object(sys, 'argv', ['deploy.py', '--target', profile['name']]), \
                         patch.object(deploy, 'OUTPUT', output), \
                         patch('deploy.platform.system', return_value='Linux'), \
@@ -52,6 +55,8 @@ class DeploymentTests(unittest.TestCase):
                 results = json.loads((output / 'build-results.json').read_text())
                 self.assertEqual(len(results), 1)
                 self.assertEqual(results[0]['status'], 'failed' if failure else 'built-needs-installation-test')
+                self.assertEqual(results[0]['version'], json.loads((ROOT / 'package.json').read_text())['version'])
+                self.assertIn('source_commit', results[0])
                 self.assertEqual(json.loads((output / profile['name'] / 'build-result.json').read_text()), results[0])
 
     def test_each_folder_has_a_result_even_when_specs_are_incomplete(self):
@@ -120,6 +125,7 @@ class DeploymentTests(unittest.TestCase):
                 names = set(archive.namelist())
             for name in ('README.md', '.gitignore', 'package-lock.json', 'src-tauri/Cargo.lock',
                          'deployment/requirements-build.txt', '.github/workflows/deployment.yml',
+                         'docs/releases.md',
                          'OS-specs-for-deployment/linux-1/target.json',
                          'tests/fixtures/bandcamp-el-sonido.html'):
                 self.assertIn(name, names)
