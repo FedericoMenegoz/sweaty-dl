@@ -1,11 +1,19 @@
 """Provider searches and conservative, version-aware fallback matching."""
 from dataclasses import dataclass, field
 import re
+from itertools import islice
 import unicodedata
 from urllib.parse import urljoin
 
 import requests
 from bs4 import BeautifulSoup
+
+try:
+    from .download import public_connections, public_url
+    from .collection_resolver import _metadata_downloader
+except ImportError:
+    from download import public_connections, public_url
+    from collection_resolver import _metadata_downloader
 
 
 class SearchError(RuntimeError):
@@ -92,12 +100,27 @@ def parse_bandcamp(html):
 
 def bandcamp_search(query):
     try:
-        response = requests.get('https://bandcamp.com/search',
-                                params={'q': query, 'item_type': 't'},
-                                headers={'User-Agent': 'SweatyDL/0.4'}, timeout=(8, 20))
-        response.raise_for_status()
-        return parse_bandcamp(response.text)
-    except requests.RequestException as error:
+        url = requests.Request('GET', 'https://bandcamp.com/search',
+                               params={'q': query, 'item_type': 't'}).prepare().url
+        with public_connections(), requests.Session() as session:
+            # No implicit .netrc credentials, proxies, or custom CA paths.
+            session.trust_env = False
+            for _ in range(6):
+                public_url(url)
+                with session.get(url, headers={'User-Agent': 'SweatyDL/0.4'},
+                                 timeout=(8, 20), allow_redirects=False, stream=True) as response:
+                    if response.is_redirect:
+                        url = urljoin(url, response.headers.get('Location', ''))
+                        continue
+                    response.raise_for_status()
+                    body = bytearray()
+                    for chunk in response.iter_content(64 * 1024):
+                        if len(body) + len(chunk) > 4 * 1024 * 1024:
+                            raise SearchError('Bandcamp search response too large. Try again.')
+                        body.extend(chunk)
+                    return parse_bandcamp(bytes(body))
+        raise SearchError('Too many redirects during Bandcamp search.')
+    except (requests.RequestException, ValueError) as error:
         # Transport exceptions can contain signed URLs, credentials, or local paths.
         raise SearchError('Unable to reach Bandcamp. Check your network and try again.') from error
 
@@ -109,15 +132,17 @@ def ytdlp_search(source, query):
         raise SearchError('The yt-dlp component is unavailable in this installation.') from error
     prefix = {'SoundCloud': 'scsearch8', 'YouTube': 'ytsearch8'}[source]
     try:
-        from runtime_tools import javascript_options
-        with YoutubeDL({'quiet': True, 'no_warnings': True, 'extract_flat': True,
-                        'socket_timeout': 15, 'retries': 1, 'extractor_retries': 1,
-                        'skip_download': True, **javascript_options()}) as downloader:
+        # Reuse the URL/redirect checks and single reviewed urllib handler used
+        # by collection resolution. Evaluate lazy entries while the guards live.
+        with public_connections(), _metadata_downloader() as (downloader, logger):
             info = downloader.extract_info(f'{prefix}:{query}', download=False)
+            entries = list(islice((info or {}).get('entries') or [], 9))
+            if len(entries) > 8 or logger.incomplete:
+                raise SearchError(f'{source}: incomplete search response. Try again.')
         if not info:
             raise SearchError(f'{source}: empty response from the service.')
         results = []
-        for entry in info.get('entries') or []:
+        for entry in entries:
             if not entry:
                 continue
             url = entry.get('webpage_url') or entry.get('url') or ''

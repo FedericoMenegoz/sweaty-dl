@@ -89,7 +89,7 @@ class ProviderErrorSecurityTests(unittest.TestCase):
     def test_bandcamp_error_does_not_disclose_transport_details(self):
         import requests
         detail = 'https://cdn.example/audio?token=FIXTURE_ONLY /private/fixture-user/audio'
-        with patch('requests.get', side_effect=requests.RequestException(detail)):
+        with patch('requests.Session.get', side_effect=requests.RequestException(detail)):
             report = provider_search.search_tracks('Fixture', mode='Bandcamp')
         self.assertEqual(report.searched, ['Bandcamp'])
         self.assertIn('Bandcamp', report.errors)

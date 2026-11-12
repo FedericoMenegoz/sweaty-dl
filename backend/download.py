@@ -186,8 +186,15 @@ def publish(path, folder, filename, expected):
     return str(target)
 
 
-def bandcamp_stream(track, temporary, destination):
+@contextlib.contextmanager
+def _public_session():
     import requests
+    with requests.Session() as session:
+        session.trust_env = False
+        yield session
+
+
+def bandcamp_stream(track, temporary, destination):
     diag.stage('bandcamp_connect', track=diag.resource(track.get('track_url', '')))
     stream = track['stream_url']
     for _ in range(6):
@@ -195,7 +202,8 @@ def bandcamp_stream(track, temporary, destination):
         parsed = public_url(stream)
         if not parsed.hostname.endswith('.bcbits.com') or not parsed.path.startswith('/stream/'):
             raise UserError('Bandcamp source not allowed.')
-        with requests.get(stream, stream=True, timeout=(15, 20), allow_redirects=False) as response:
+        with _public_session() as session, session.get(
+                stream, stream=True, timeout=(15, 20), allow_redirects=False) as response:
             diag.log('bandcamp_http_response', http_status=response.status_code,
                      content_type=response.headers.get('Content-Type'), content_length=response.headers.get('Content-Length'))
             if response.is_redirect:

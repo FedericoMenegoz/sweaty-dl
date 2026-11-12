@@ -57,7 +57,7 @@ class DownloadTests(unittest.TestCase):
         response.is_redirect = True
         response.headers = {'Location': 'https://evil.example/stream/file'}
         track = {'stream_url': 'https://t4.bcbits.com/stream/file'}
-        with patch('requests.get', return_value=response) as request:
+        with patch('requests.Session.get', return_value=response) as request:
             with self.assertRaisesRegex(ValueError, 'not allowed'):
                 worker.bandcamp_stream(track, Path('/tmp'), Path('/tmp'))
             self.assertEqual(request.call_count, 1)
@@ -140,7 +140,7 @@ from tests.test_download import audio_bytes
 content = audio_bytes()
 response.headers = {'Content-Length': str(len(content)), 'Content-Type': 'audio/wav'}
 response.iter_content.return_value = [content]
-with patch('requests.get', return_value=response):
+with patch('requests.Session.get', return_value=response):
     runpy.run_path('backend/download.py', run_name='__main__')
 """
         with tempfile.TemporaryDirectory() as folder:
