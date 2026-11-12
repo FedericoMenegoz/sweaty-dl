@@ -1,6 +1,11 @@
 name: Build deployment profiles
 on:
   workflow_dispatch:
+    inputs:
+      profile:
+        description: 'Optional native profile, such as windows-1; leave empty to build all'
+        type: string
+        required: false
   push:
     branches: ['deployment']
     tags: ['v*']
@@ -42,11 +47,17 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: bash scripts/release.sh prepare
       - id: targets
+        env:
+          BUILD_PROFILE: ${{ github.event_name == 'workflow_dispatch' && inputs.profile || '' }}
         shell: bash
         run: |
           set -euo pipefail
       
-          matrix="$(python3 -B scripts/deploy.py --matrix)"
+          arguments=()
+          if [ -n "$BUILD_PROFILE" ]; then
+            arguments+=(--target "$BUILD_PROFILE")
+          fi
+          matrix="$(python3 -B scripts/deploy.py --matrix "${arguments[@]}")"
       
           if [ -z "$matrix" ]; then
             echo "::error::Deployment matrix is empty"

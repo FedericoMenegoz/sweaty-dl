@@ -55,6 +55,9 @@ git push origin deployment
 Ordinary development pushes and pull requests do not publish releases. The
 existing manual workflow dispatch and `v*` tag build triggers remain available
 as build-only runs, including manual dispatch on `deployment`.
+Manual dispatch accepts an optional `profile` such as `windows-1` for investigating
+one platform. Leave it empty for the full build matrix. Push-triggered builds
+always use all configured profiles.
 
 ### Versioning and retries
 
