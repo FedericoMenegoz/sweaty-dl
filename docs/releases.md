@@ -180,7 +180,8 @@ runner, installs locked tools without npm lifecycle scripts, and receives the
 key only in its signing step. It does not execute downloaded packages.
 
 For local builds, `npm run deploy -- --target mac-1 --updater` prepares unsigned
-updater packages. Signing uses `scripts/sign_release.py` with the private key in
+updater packages. Use the pinned tools described below for release validation.
+Signing uses `scripts/sign_release.py` with the private key in
 its environment and Minisign installed; it verifies every resulting signature
 against the embedded public key and release version. Do not export the private
 key into general build commands.
@@ -212,13 +213,14 @@ Publication is deliberately disabled until the maintainer sets the repository
 variable `RELEASE_ENABLED=true`. Do not set it until the following checks pass.
 This is a one-time setup gate; enabled deployment pushes remain automatic.
 
-- Provision reviewed Node and FFprobe binaries on each native runner. The current
-  Node baseline is 22.23.5 (or the reviewed 24.22.3/26.13.1 release lines); the
-  FFprobe baseline is 8.1.2. Release builds reject older or unrecognizable versions,
-  including reused backends. A version floor is not proof of origin or absence of
-  vulnerabilities: pin and verify upstream/vendor archive hashes and record the
-  source before enabling publication. The current Linux system-package install
-  may be too old and must be replaced with reviewed provisioning.
+- Validate the pinned native tool preparation on every runner. Node 22.23.5
+  platform archives and FFmpeg 9.0.2 source are pinned by SHA-256 in
+  `deployment/toolchain.json`. Their upstream signatures were checked against
+  the official release public keys before recording these pins. Updates require
+  repeating that review; CI never accepts a newly downloaded checksum as its pin.
+  Release builds check the prepared proof and actual bundled tool hashes and
+  require a freshly packaged backend. A version floor alone is not proof of origin
+  or security.
 - Rebuild each bundled backend with the final source and dependency locks, and
   exercise installed startup and backend self-tests without system Python. Check
   that the package contains the intended OS/architecture and current bundled tools.
@@ -238,6 +240,38 @@ The isolated signing job adds signatures and updated checksums. The publishing
 job independently verifies signatures again using Minisign, then uploads the
 complete draft release and publishes it. Actions are pinned to immutable commits;
 review these pins during routine dependency updates.
+
+### Pinned standalone tools
+
+`scripts/prepare_release_tools.py` downloads and verifies the official Node archive
+for the native x64 host and builds FFprobe from the pinned upstream source.
+FFprobe uses internal demuxers/parsers for container-duration fallback, without
+decoders, encoders, external codec libraries or network protocols; only local-file
+input is enabled. This avoids bundling the unrelated libraries pulled in by a
+general-purpose media distribution. Checks cover version, protocols and a real
+WAV duration probe before the tool proof is written.
+
+Native compiler and Make come from the runner image. Windows uses its preinstalled
+MSYS2 Bash and MinGW UCRT GCC/Make; missing tools stop the build rather than installing
+unreviewed packages. Runner provisioning and actual Windows/Linux package behavior
+still require hosted validation. Prepared paths are exported through `GITHUB_ENV`
+for subsequent workflow steps; updater signing secrets are never passed to this
+preparation step.
+
+Prepared tool bytes are preserved during backend packaging and final macOS app
+signing. On macOS, the verified Node image receives the existing ad-hoc signature;
+both its upstream hash and the reviewed prepared-image hash are pinned. Strict
+signature verification remains required. Official Node images contain public
+upstream build paths; the path scanner
+accepts only their exact reviewed binary hashes, while still checking credential
+patterns. Changing any byte removes that exception. Optional wheel metadata long
+descriptions are omitted to avoid shipping documentation path examples; metadata
+headers and license notices are retained.
+
+The backend notices include the exact FFmpeg source archive, license and build
+recipe, along with Node's license. Review redistribution obligations for all bundled
+components before public distribution; these materials do not constitute a legal
+compliance certification.
 
 The reviewed dependency updates include [Vite 6.4.6](https://github.com/vitejs/vite/security/advisories/GHSA-p4f5-76q4-ffq7)
 and [Requests 2.33.0](https://github.com/psf/requests/security/advisories/GHSA-gc5v-m9x4-r6x2).

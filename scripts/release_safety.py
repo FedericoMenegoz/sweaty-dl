@@ -1,4 +1,6 @@
 """Local checks for files that are about to enter public release artifacts."""
+import hashlib
+import json
 from pathlib import Path, PurePosixPath
 import posixpath
 import re
@@ -36,14 +38,26 @@ def check_link(name, linkname, hardlink=False):
 
 def scan_stream(stream):
     tail = b''
+    digest = hashlib.sha256()
+    home_path = False
     while True:
         block = stream.read(1024 * 1024)
         if not block:
+            if home_path:
+                # Prepared Node binaries contain upstream build paths. Allow
+                # only the exact reviewed images derived from signed archives;
+                # any byte change restores the ordinary home-path rejection.
+                pins = Path(__file__).resolve().parents[1] / 'deployment/toolchain.json'
+                reviewed = json.loads(pins.read_text())['node']['platforms'] if pins.is_file() else {}
+                if digest.hexdigest() not in {item.get('packaged_sha256', item['binary_sha256']) for item in reviewed.values()}:
+                    raise ValueError('Artifact contains a credential pattern or a local user path.')
             return
+        digest.update(block)
         data = tail + block
-        if PRIVATE_DATA.search(data) or LOCAL_HOME.search(data):
+        if PRIVATE_DATA.search(data):
             # Never include the match in errors or CI logs.
             raise ValueError('Artifact contains a credential pattern or a local user path.')
+        home_path |= bool(LOCAL_HOME.search(data))
         tail = data[-4096:]
 
 

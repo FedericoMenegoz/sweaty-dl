@@ -128,7 +128,9 @@ def prepare_update(profile, artifacts, version):
 
 
 def build(profile, skip_backend=False, updater=False):
-    from package_backend import package, RESOURCES, validate_release_tools
+    from package_backend import package, RESOURCES, validate_release_tools, verified_toolchain
+    if skip_backend and os.environ.get('SWEATYDL_RELEASE_BUILD') == '1':
+        raise RuntimeError('Release builds require a freshly packaged backend from the current source.')
     if not skip_backend:
         package()
     proof = json.loads((RESOURCES / 'build-info.json').read_text())
@@ -136,6 +138,8 @@ def build(profile, skip_backend=False, updater=False):
         raise RuntimeError('Standalone backend proof is missing or for another target.')
     if os.environ.get('SWEATYDL_RELEASE_BUILD') == '1':
         validate_release_tools(proof)
+        verified_toolchain({name: RESOURCES / '_internal/tools' / (name + ('.exe' if os.name == 'nt' else ''))
+                            for name in ('node', 'ffprobe')}, proof.get('toolchain'))
     version = json.loads((ROOT / 'package.json').read_text())['version']
     directory = OUTPUT / profile['name']
     directory.mkdir(parents=True, exist_ok=True)
@@ -188,7 +192,9 @@ def build(profile, skip_backend=False, updater=False):
             raise RuntimeError('Backend self-test inside final .app failed.')
         from release_safety import scan_tree
         scan_tree(app)
-        run(['codesign', '--force', '--deep', '--sign', '-', app])
+        # Nested executables already have valid signatures. Signing only the
+        # enclosing app preserves the exact reviewed standalone tool images.
+        run(['codesign', '--force', '--sign', '-', app])
         run(['codesign', '--verify', '--deep', '--strict', app])
         archive = directory / f'SweatyDL-Next_{version}_{profile["name"]}_x64.app.zip'
         make_app_zip(app, archive)

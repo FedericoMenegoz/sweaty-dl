@@ -92,6 +92,43 @@ def copy_tool_notices(tool, destination):
                 shutil.copy2(file, folder / file.name)
 
 
+def strip_metadata_descriptions(staged):
+    # Wheel long descriptions are documentation, not runtime metadata. They
+    # include upstream command examples with home paths; license headers and
+    # separately packaged notice files are retained verbatim.
+    for path in staged.glob('_internal/*.dist-info/METADATA'):
+        data = path.read_bytes()
+        separator = b'\r\n\r\n' if b'\r\n\r\n' in data else b'\n\n'
+        headers, found, _ = data.partition(separator)
+        if found:
+            path.write_bytes(headers + separator)
+
+
+def verified_toolchain(tools, proof=None):
+    """Release tools must match the hash-verified preparation step's proof."""
+    proof_path = os.environ.get('SWEATYDL_TOOLCHAIN')
+    if proof is None and not proof_path:
+        if os.environ.get('SWEATYDL_RELEASE_BUILD') == '1':
+            raise RuntimeError('Prepare pinned release tools before packaging (scripts/prepare_release_tools.py).')
+        return None
+    if proof is None:
+        proof = json.loads(Path(proof_path).read_text())
+    pins = json.loads((ROOT / 'deployment/toolchain.json').read_text())
+    node = pins['node']['platforms'][platform.system()]
+    expected = {
+        'node': (f'https://nodejs.org/dist/v{pins["node"]["version"]}/{node["archive"]}', node['sha256']),
+        'ffprobe': (pins['ffprobe']['url'], pins['ffprobe']['sha256']),
+    }
+    for name, (url, archive_hash) in expected.items():
+        record = proof['tools'][name]
+        digest = hashlib.sha256(Path(tools[name]).read_bytes()).hexdigest()
+        if (record['url'] != url or record['archive_sha256'] != archive_hash
+                or record['sha256'] != digest
+                or (name == 'node' and digest != node.get('packaged_sha256', node['binary_sha256']))):
+            raise RuntimeError(f'Bundled {name} does not match the pinned toolchain proof.')
+    return proof
+
+
 def package():
     if platform.system() not in ('Darwin', 'Windows', 'Linux'):
         raise RuntimeError('Build this backend on the matching macOS, Windows or Linux host.')
@@ -102,6 +139,7 @@ def package():
         if not path or not Path(path).is_file():
             raise RuntimeError(f'Missing build tool {name}: set SWEATYDL_{name.upper()} to its executable.')
         tools[name] = str(Path(path).resolve())
+    toolchain = verified_toolchain(tools)
     BUILD.mkdir(parents=True, exist_ok=True)
     environment = {**os.environ, 'PYINSTALLER_CONFIG_DIR': str(BUILD / 'cache'), 'PYTHONDONTWRITEBYTECODE': '1'}
     for key in list(environment):
@@ -117,17 +155,30 @@ def package():
         command.extend(['--copy-metadata', name])
     command.extend(['--collect-all', 'yt_dlp_ejs'])
     for path in tools.values():
-        command.extend(['--add-binary', f'{path}{os.pathsep}tools'])
+        # Prepared tools are standalone executables linked only to OS libraries.
+        # Preserve their verified bytes/signatures; PyInstaller's binary pass
+        # rewrites Mach-O load commands and re-signs even the official Node image.
+        command.extend(['--add-data' if toolchain else '--add-binary', f'{path}{os.pathsep}tools'])
     command.append(str(ROOT / 'backend' / 'entry.py'))
     log = BUILD / 'pyinstaller.log'
     print(f'PyInstaller log: {log}', flush=True)
     with log.open('w') as output:
         run(command, env=environment, stdout=output, stderr=subprocess.STDOUT, cwd=ROOT)
     staged = BUILD / 'dist' / 'sweatydl-backend'
+    if toolchain:
+        bundled_tools = {name: staged / '_internal/tools' / Path(path).name for name, path in tools.items()}
+        if os.name != 'nt':
+            for path in bundled_tools.values():
+                path.chmod(0o755)
+        verified_toolchain(bundled_tools, toolchain)
     notices = staged / 'THIRD-PARTY-NOTICES'
     inventory = copy_notices(notices)
+    strip_metadata_descriptions(staged)
     for path in tools.values():
         copy_tool_notices(path, notices)
+    if toolchain:
+        prepared = Path(os.environ['SWEATYDL_TOOLCHAIN']).parent / 'notices'
+        shutil.copytree(prepared, notices / 'release-tools', dirs_exist_ok=True)
     (notices / 'README.txt').write_text('SweatyDL bundles Python, yt-dlp, requests, BeautifulSoup, mutagen, Node.js and FFprobe plus their dependencies.\nPython: https://www.python.org/\nyt-dlp: https://github.com/yt-dlp/yt-dlp\nNode.js: https://nodejs.org/\nFFmpeg/FFprobe source and licensing: https://ffmpeg.org/legal.html\nMutagen source: https://github.com/quodlibet/mutagen\nThis private test build is unsigned/unnotarized. Review all dependency licenses before public distribution.\n')
     executable = staged / ('sweatydl-backend.exe' if os.name == 'nt' else 'sweatydl-backend')
     # Run with no development Python, Node or FFprobe on PATH and no project cwd.
@@ -140,13 +191,15 @@ def package():
     if os.environ.get('SWEATYDL_RELEASE_BUILD') == '1':
         validate_release_tools(result)
     result['tool_sha256'] = {name: hashlib.sha256(Path(path).read_bytes()).hexdigest() for name, path in tools.items()}
+    if toolchain:
+        result['toolchain'] = toolchain
     forbidden = [path for path in staged.rglob('*') if any(part.lower().startswith(('pyside', 'pyqt', 'shiboken', 'node_modules')) for part in path.parts)]
     if forbidden:
         raise RuntimeError(f'Forbidden GUI/build dependency in backend: {forbidden[0].name}')
-    from release_safety import scan_tree
-    scan_tree(staged)
     result.update({'os': platform.system(), 'arch': platform.machine(), 'inventory_count': len(inventory)})
     (staged / 'build-info.json').write_text(json.dumps(result, indent=2))
+    from release_safety import scan_tree
+    scan_tree(staged)
     RESOURCES.parent.mkdir(parents=True, exist_ok=True)
     if RESOURCES.exists():
         shutil.rmtree(RESOURCES)

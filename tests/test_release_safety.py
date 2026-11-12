@@ -15,12 +15,18 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'scripts'))
 import package_backend
+import deploy
 import release_safety
 import sign_release
 import updater_manifest
 
 
 class ReleaseSafetyTests(unittest.TestCase):
+    def test_release_build_cannot_reuse_a_backend_from_another_source(self):
+        with patch.dict(os.environ, {'SWEATYDL_RELEASE_BUILD': '1'}):
+            with self.assertRaisesRegex(RuntimeError, 'freshly packaged backend'):
+                deploy.build({'name': 'linux-1'}, skip_backend=True)
+
     def test_embedded_credentials_and_home_paths_stop_staging_without_echoing_matches(self):
         fixtures = [b'ghp_' + b'X' * 36, b'/Users/' + b'fixture-owner/project',
                     b'/home/' + b'fixture-owner/project', b'C:\\Users\\' + b'fixture-owner\\project']
@@ -95,6 +101,67 @@ class ReleaseSafetyTests(unittest.TestCase):
                 package_backend.copy_notices(root / 'output')
             names = [path.name for path in (root / 'output/fixture-package').iterdir()]
             self.assertEqual(sorted(names), ['0-LICENSE', '1-MIT.txt'])
+
+    def test_runtime_metadata_retains_headers_and_licenses_without_documentation_examples(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            metadata = root / '_internal/fixture.dist-info/METADATA'
+            metadata.parent.mkdir(parents=True)
+            headers = b'Metadata-Version: 2.4\nName: fixture\nVersion: 1.0.0\nLicense-Expression: MIT'
+            metadata.write_bytes(headers + b'\n\nDocumentation example: /home/' + b'fixture-owner/file\n')
+            license_path = metadata.with_name('LICENSE')
+            license_path.write_bytes(b'Unchanged license')
+            package_backend.strip_metadata_descriptions(root)
+            self.assertEqual(metadata.read_bytes(), headers + b'\n\n')
+            self.assertEqual(license_path.read_bytes(), b'Unchanged license')
+            release_safety.scan_tree(root)
+
+    def test_pinned_upstream_node_images_allow_public_build_paths_only_when_bytes_match(self):
+        import hashlib
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            script = root / 'scripts/release_safety.py'
+            script.parent.mkdir()
+            config = root / 'deployment/toolchain.json'
+            config.parent.mkdir()
+            binary = b'Official upstream fixture /home/' + b'upstream-builder/source'
+            digest = hashlib.sha256(binary).hexdigest()
+            config.write_text(json.dumps({'node': {'platforms': {'Linux': {'binary_sha256': digest}}}}))
+            with patch.object(release_safety, '__file__', str(script)):
+                release_safety.scan_stream(io.BytesIO(binary))
+                with self.assertRaises(ValueError):
+                    release_safety.scan_stream(io.BytesIO(binary + b'modified'))
+                with self.assertRaises(ValueError):
+                    release_safety.scan_stream(io.BytesIO(binary + b'ghp_' + b'X' * 36))
+
+    def test_release_tool_proof_requires_pinned_origins_and_actual_binaries(self):
+        import hashlib
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'deployment').mkdir()
+            node, ffprobe = root / 'node', root / 'ffprobe'
+            node.write_bytes(b'node fixture')
+            ffprobe.write_bytes(b'ffprobe fixture')
+            node_hash = hashlib.sha256(node.read_bytes()).hexdigest()
+            pins = {'node': {'version': '22.23.5', 'platforms': {'Linux': {
+                'archive': 'node.tar.xz', 'sha256': 'a' * 64, 'binary_sha256': node_hash}}},
+                'ffprobe': {'url': 'https://ffmpeg.org/releases/source.tar.xz', 'sha256': 'b' * 64}}
+            (root / 'deployment/toolchain.json').write_text(json.dumps(pins))
+            proof = {'tools': {
+                'node': {'url': 'https://nodejs.org/dist/v22.23.5/node.tar.xz',
+                         'archive_sha256': 'a' * 64, 'sha256': node_hash},
+                'ffprobe': {'url': pins['ffprobe']['url'], 'archive_sha256': 'b' * 64,
+                            'sha256': hashlib.sha256(ffprobe.read_bytes()).hexdigest()}}}
+            tools = {'node': node, 'ffprobe': ffprobe}
+            with patch.object(package_backend, 'ROOT', root), patch('package_backend.platform.system', return_value='Linux'):
+                self.assertEqual(package_backend.verified_toolchain(tools, proof), proof)
+                node.write_bytes(b'tampered fixture')
+                with self.assertRaises(RuntimeError):
+                    package_backend.verified_toolchain(tools, proof)
+                node.write_bytes(b'node fixture')
+                proof['tools']['ffprobe']['url'] = 'https://example.invalid/source.tar.xz'
+                with self.assertRaises(RuntimeError):
+                    package_backend.verified_toolchain(tools, proof)
 
 
 class SignatureVerificationTests(unittest.TestCase):
