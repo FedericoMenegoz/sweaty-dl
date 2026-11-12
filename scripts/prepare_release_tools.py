@@ -254,30 +254,59 @@ def _native_tools(platform_name):
     return Path(bash), Path(compiler), Path(make), Path(compiler).parent
 
 
-def _safe_build_diagnostics(output, env=None, cwd=None):
+def _safe_build_diagnostics(output, env=None, cwd=None, configure_log=''):
     if isinstance(output, bytes):
         output = output.decode('utf-8', errors='replace')
-    if re.search(r'(?im)-----BEGIN [^-]*PRIVATE KEY-----|-----END [^-]*PRIVATE KEY-----', output):
+    if isinstance(configure_log, bytes):
+        configure_log = configure_log.decode('utf-8', errors='replace')
+    combined = output + '\n' + configure_log
+    if re.search(r'(?im)-----BEGIN [^-]*PRIVATE KEY-----|-----END [^-]*PRIVATE KEY-----', combined):
         return ['Compiler diagnostics withheld because a private-key marker was detected.']
     sensitive_paths = [str(cwd)] if cwd else []
     sensitive_paths.extend(str(env[key]) for key in ('HOME', 'TEMP', 'TMP', 'TMPDIR',
                                                      'GITHUB_WORKSPACE', 'RUNNER_TEMP')
                            if env and env.get(key))
-    lines = []
-    for raw in output.splitlines():
+    def sanitize(raw):
         line = ''.join(char if char in '\t' or ord(char) >= 32 else ' ' for char in raw)
         if re.search(r'(?i)\b(?:token|secret|password|private[_ -]?key|authorization|bearer)\b\s*(?:[:=]|\s)|'
                      r'\b(?:gh[pousr]_[A-Za-z0-9_]{8,}|github_pat_[A-Za-z0-9_]{8,})\b', line):
-            continue
+            return None
         for path in sensitive_paths:
             line = re.sub(re.escape(path), '[PATH]', line, flags=re.I)
         line = re.sub(r'https?://[^\s<>"\']+', '[URL]', line, flags=re.I)
         line = re.sub(r'(?i)(?:[A-Z]:[\\/]|/)(?:[^\s<>"\'(),;]+[\\/])*[^\s<>"\'(),;]+',
                       '[PATH]', line)
-        if re.search(r'(?i)(?:\berror\b|\bwarning\b|undefined reference|cannot find|'
-                     r'not found|no such file|permission denied|failed|unable|unrecognized|collect2:|ld\.exe:)', line):
-            lines.append(line[:300])
-    return lines[-15:] or ['No safe compiler/configure diagnostics were available.']
+        return line[:300]
+
+    diagnostic = re.compile(r'(?i)(?:\berror\b|\bwarning\b|undefined reference|cannot find|'
+                            r'not found|no such file|permission denied|failed|unable|lacks|unrecognized|collect2:|ld\.exe:)')
+    stdout_lines = [safe for raw in output.splitlines() if diagnostic.search(raw)
+                    for safe in [sanitize(raw)] if safe]
+    log_lines = configure_log.splitlines()
+    markers = [i for i, line in enumerate(log_lines)
+               if re.search(r'\btest_cflags_cc\s+-std=c(?:17|11)\b', line)]
+    context = []
+    if markers:
+        for index in markers[-2:]:
+            following = next((position for position in markers if position > index), index + 30)
+            # FFmpeg logs the generated source between test_cc and the actual
+            # compiler command. Retain commands/errors, not the source dump.
+            block = log_lines[index:min(following, index + 30)]
+            context.extend(line for line in block if '-std=c17' in line or '-std=c11' in line
+                           or (diagnostic.search(line) and not re.match(r'\s*\d+\s', line)))
+        failure = next((line for line in reversed(log_lines)
+                        if re.search(r'Compiler lacks C11 support|ERROR:.*failed', line, re.I)), None)
+        if failure:
+            context.append(failure)
+    else:
+        context = [line for line in log_lines[-40:]
+                   if re.search(r'(?i)(?:\berror\b|\bwarning\b|undefined reference|cannot find|'
+                                r'not found|no such file|permission denied|failed|unable|unrecognized|collect2:|ld\.exe:)', line)]
+    safe_context = [line for line in (sanitize(line) for line in context) if line]
+    lines = [f'stdout: {line}' for line in stdout_lines[-3:]]
+    if safe_context:
+        lines.extend(f'configure log: {line}' for line in safe_context[-10:])
+    return [line[:300] for line in lines[-15:]] or ['No safe compiler/configure diagnostics were available.']
 
 
 def _run(command, cwd, env, bash=None, windows=False, phase='configure/make'):
@@ -297,20 +326,22 @@ def _run(command, cwd, env, bash=None, windows=False, phase='configure/make'):
         if isinstance(output, str):
             output = output.encode()
         detail = Path(cwd) / 'ffbuild/config.log'
+        configure_log = b''
         if phase == 'configure' and detail.is_file() and not detail.is_symlink():
             # Configure's stdout often says only "compiler test failed". Read
-            # a bounded tail of its detailed log, through the same redactor.
+            # the bounded C-standard probe context from its detailed log.
             with detail.open('rb') as source:
                 source.seek(max(0, detail.stat().st_size - 65536))
-                output += b'\n' + source.read(65536)
-        if output:
+                configure_log = source.read(65536)
+        private_output = output + (b'\n' + configure_log if configure_log else b'')
+        if private_output:
             log = OUTPUT_ROOT / 'build-failure.log'
             descriptor = os.open(log, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, 'O_NOFOLLOW', 0), 0o600)
             with os.fdopen(descriptor, 'wb') as private_log:
-                private_log.write(output)
+                private_log.write(private_output)
         code = getattr(error, 'returncode', None) or getattr(error, 'errno', None)
         print(f'FFmpeg source {phase} failed (code {code}); sanitized diagnostics:', file=sys.stderr)
-        for line in _safe_build_diagnostics(output, env, cwd):
+        for line in _safe_build_diagnostics(output, env, cwd, configure_log):
             print(line, file=sys.stderr)
         raise RuntimeError(f'FFmpeg source {phase} failed; full output was retained only on the runner when available.') from None
 

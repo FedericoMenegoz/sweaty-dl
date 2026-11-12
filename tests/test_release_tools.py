@@ -138,12 +138,42 @@ class ReleaseToolsTests(unittest.TestCase):
             'error: before\n-----BEGIN RSA PRIVATE KEY-----\nsecret\n-----END RSA PRIVATE KEY-----'),
             ['Compiler diagnostics withheld because a private-key marker was detected.'])
 
-    def test_build_diagnostics_keep_only_last_fifteen_error_or_warning_lines(self):
+    def test_build_diagnostics_keep_only_last_three_stdout_errors_or_warnings(self):
         output = '\n'.join(f'warning: compiler diagnostic {index}' for index in range(20))
         lines = prepare_release_tools._safe_build_diagnostics(output)
-        self.assertEqual(len(lines), 15)
-        self.assertIn('diagnostic 5', lines[0])
+        self.assertEqual(len(lines), 3)
+        self.assertIn('diagnostic 17', lines[0])
         self.assertIn('diagnostic 19', lines[-1])
+
+    def test_configure_failure_includes_c_standard_command_context(self):
+        stdout = 'checking compiler support...\nCompiler lacks C11 support\n'
+        config_log = '\n'.join([
+            'test_cflags_cc -std=c17 ctype.h "__STDC_VERSION__ >= 201112L"',
+            'test_cc -std=c17',
+            'BEGIN /tmp/ffconf/probe.c',
+            '1 #include <ctype.h>',
+            '2 #if !(__STDC_VERSION__ >= 201112L)',
+            '3 #error "unsatisfied condition"',
+            '4 #endif',
+            'END /tmp/ffconf/probe.c',
+            'gcc -O2 -ffile-prefix-map=D:/a/_temp/build=. -std=c17 -c probe.c',
+            'probe.c:3:2: error: condition failed',
+            'test_cflags_cc -std=c11 ctype.h "__STDC_VERSION__ >= 201112L"',
+            'test_cc -std=c11',
+            'gcc -O2 -ffile-prefix-map=D:/a/_temp/build=. -std=c11 -c probe.c',
+            'probe.c:3:2: error: condition failed',
+            'ERROR: Compiler lacks C11 support',
+        ])
+        lines = prepare_release_tools._safe_build_diagnostics(stdout, cwd='D:/a/_temp/build',
+                                                               configure_log=config_log)
+        self.assertTrue(any(line.startswith('stdout:') and 'Compiler lacks C11 support' in line
+                            for line in lines))
+        self.assertTrue(any('configure log:' in line and '-std=c17' in line for line in lines))
+        self.assertTrue(any('configure log:' in line and '-std=c11' in line for line in lines))
+        self.assertTrue(any('gcc -O2' in line and '-std=c17' in line for line in lines))
+        self.assertTrue(all(len(line) <= 300 for line in lines))
+        self.assertLessEqual(len(lines), 15)
+        self.assertNotIn('D:/a/_temp', '\n'.join(lines))
 
 
 if __name__ == '__main__':
