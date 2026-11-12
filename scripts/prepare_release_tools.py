@@ -254,23 +254,65 @@ def _native_tools(platform_name):
     return Path(bash), Path(compiler), Path(make), Path(compiler).parent
 
 
-def _run(command, cwd, env, bash=None, windows=False):
+def _safe_build_diagnostics(output, env=None, cwd=None):
+    if isinstance(output, bytes):
+        output = output.decode('utf-8', errors='replace')
+    if re.search(r'(?im)-----BEGIN [^-]*PRIVATE KEY-----|-----END [^-]*PRIVATE KEY-----', output):
+        return ['Compiler diagnostics withheld because a private-key marker was detected.']
+    sensitive_paths = [str(cwd)] if cwd else []
+    sensitive_paths.extend(str(env[key]) for key in ('HOME', 'TEMP', 'TMP', 'TMPDIR',
+                                                     'GITHUB_WORKSPACE', 'RUNNER_TEMP')
+                           if env and env.get(key))
+    lines = []
+    for raw in output.splitlines():
+        line = ''.join(char if char in '\t' or ord(char) >= 32 else ' ' for char in raw)
+        if re.search(r'(?i)\b(?:token|secret|password|private[_ -]?key|authorization|bearer)\b\s*(?:[:=]|\s)|'
+                     r'\b(?:gh[pousr]_[A-Za-z0-9_]{8,}|github_pat_[A-Za-z0-9_]{8,})\b', line):
+            continue
+        for path in sensitive_paths:
+            line = re.sub(re.escape(path), '[PATH]', line, flags=re.I)
+        line = re.sub(r'https?://[^\s<>"\']+', '[URL]', line, flags=re.I)
+        line = re.sub(r'(?i)(?:[A-Z]:[\\/]|/)(?:[^\s<>"\'(),;]+[\\/])*[^\s<>"\'(),;]+',
+                      '[PATH]', line)
+        if re.search(r'(?i)(?:\berror\b|\bwarning\b|undefined reference|cannot find|'
+                     r'not found|no such file|permission denied|failed|unable|unrecognized|collect2:|ld\.exe:)', line):
+            lines.append(line[:300])
+    return lines[-15:] or ['No safe compiler/configure diagnostics were available.']
+
+
+def _run(command, cwd, env, bash=None, windows=False, phase='configure/make'):
     if windows:
-        args = [str(bash), '--noprofile', '--norc', '-c',
-                'export PATH=/c/mingw64/bin:/usr/bin; ./configure "$@" && make -j2 SHELL=C:/msys64/usr/bin/bash.exe',
-                'ffprobe-build', *command[1:]]
+        if phase == 'configure':
+            script = 'export PATH=/c/mingw64/bin:/usr/bin; ./configure "$@"'
+        else:
+            script = 'export PATH=/c/mingw64/bin:/usr/bin; make "$@" SHELL=C:/msys64/usr/bin/bash.exe'
+        args = [str(bash), '--noprofile', '--norc', '-c', script, 'ffprobe-build', *command[1:]]
     else:
         args = command
     try:
         return subprocess.run(args, cwd=cwd, env=env, check=True, stdout=subprocess.PIPE,
                               stderr=subprocess.STDOUT, timeout=900)
     except (OSError, subprocess.SubprocessError) as error:
-        if getattr(error, 'stdout', None):
+        output = getattr(error, 'stdout', None) or b''
+        if isinstance(output, str):
+            output = output.encode()
+        detail = Path(cwd) / 'ffbuild/config.log'
+        if phase == 'configure' and detail.is_file() and not detail.is_symlink():
+            # Configure's stdout often says only "compiler test failed". Read
+            # a bounded tail of its detailed log, through the same redactor.
+            with detail.open('rb') as source:
+                source.seek(max(0, detail.stat().st_size - 65536))
+                output += b'\n' + source.read(65536)
+        if output:
             log = OUTPUT_ROOT / 'build-failure.log'
             descriptor = os.open(log, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, 'O_NOFOLLOW', 0), 0o600)
-            with os.fdopen(descriptor, 'wb') as output:
-                output.write(error.stdout)
-        raise RuntimeError('FFmpeg source build failed; inspect the private .build/release-tools/build-failure.log.') from None
+            with os.fdopen(descriptor, 'wb') as private_log:
+                private_log.write(output)
+        code = getattr(error, 'returncode', None) or getattr(error, 'errno', None)
+        print(f'FFmpeg source {phase} failed (code {code}); sanitized diagnostics:', file=sys.stderr)
+        for line in _safe_build_diagnostics(output, env, cwd):
+            print(line, file=sys.stderr)
+        raise RuntimeError(f'FFmpeg source {phase} failed; full output was retained only on the runner when available.') from None
 
 
 def _compiler_identity(compiler, env):
@@ -340,6 +382,26 @@ def _smoke_test(node, ffprobe, expected_node, expected_ffprobe, env, work):
         raise RuntimeError('Prepared FFprobe failed the local duration smoke test.')
 
 
+def _export_github_tools(node, ffprobe, proof_path, bin_dir):
+    values = {'SWEATYDL_NODE': node, 'SWEATYDL_FFPROBE': ffprobe,
+              'SWEATYDL_TOOLCHAIN': proof_path}
+    for name, path in values.items():
+        value = str(path)
+        if '\n' in value or '\r' in value:
+            raise RuntimeError('Release tool path cannot be safely exported to GitHub Actions.')
+        github_env = os.environ.get('GITHUB_ENV')
+        if github_env:
+            with Path(github_env).open('a', encoding='utf-8') as stream:
+                stream.write(f'{name}={value}\n')
+    github_path = os.environ.get('GITHUB_PATH')
+    if github_path:
+        value = str(bin_dir)
+        if '\n' in value or '\r' in value:
+            raise RuntimeError('Release tool path cannot be safely exported to GitHub Actions.')
+        with Path(github_path).open('a', encoding='utf-8') as stream:
+            stream.write(f'{value}\n')
+
+
 def prepare(config_path=CONFIG, system=None):
     config = json.loads(Path(config_path).read_text(encoding='utf-8'))
     system = system or platform.system()
@@ -403,10 +465,11 @@ def prepare(config_path=CONFIG, system=None):
             config_command.append('--extra-ldflags=-static -static-libgcc')
         effective_config = config_command[1:]
         if system == 'Windows':
-            _run(config_command, source, env, bash=bash, windows=True)
+            _run(config_command, source, env, bash=bash, windows=True, phase='configure')
+            _run([str(make), '-j2'], source, env, bash=bash, windows=True, phase='make')
         else:
-            _run(config_command, source, env)
-            _run([str(make), '-j2'], source, env)
+            _run(config_command, source, env, phase='configure')
+            _run([str(make), '-j2'], source, env, phase='make')
         built = source / ('ffprobe.exe' if system == 'Windows' else 'ffprobe')
         if not built.is_file():
             raise RuntimeError('FFmpeg build did not produce the expected FFprobe executable.')
@@ -458,12 +521,7 @@ def prepare(config_path=CONFIG, system=None):
     }
     proof_path = output / 'toolchain.json'
     proof_path.write_text(json.dumps(proof, indent=2) + '\n', encoding='utf-8')
-    github_env = os.environ.get('GITHUB_ENV')
-    if github_env:
-        with Path(github_env).open('a', encoding='utf-8') as stream:
-            stream.write(f'SWEATYDL_NODE={node_path}\n')
-            stream.write(f'SWEATYDL_FFPROBE={ffprobe}\n')
-            stream.write(f'SWEATYDL_TOOLCHAIN={proof_path}\n')
+    _export_github_tools(node_path, ffprobe, proof_path, bin_dir)
     print(f'Prepared verified release tools for {host}.', flush=True)
     return proof_path
 

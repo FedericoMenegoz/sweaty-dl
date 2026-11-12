@@ -1,5 +1,6 @@
 import hashlib
 import io
+import os
 from pathlib import Path
 import sys
 import tarfile
@@ -54,7 +55,10 @@ class ReleaseToolsTests(unittest.TestCase):
             binary, license_data = prepare_release_tools.extract_node_archive(
                 archive, 'Linux', Path(directory) / 'bin', archive_hash)
             self.assertEqual(binary.read_bytes(), payload)
-            self.assertEqual(binary.stat().st_mode & 0o777, 0o755)
+            if os.name == 'posix':
+                self.assertEqual(binary.stat().st_mode & 0o777, 0o755)
+            else:
+                self.assertTrue(binary.stat().st_mode & 0o444)
             self.assertEqual(license_data, b'Node fixture license')
             self.assertEqual(sorted(p.name for p in binary.parent.iterdir()), ['node'])
             self.assertEqual(hashlib.sha256(binary.read_bytes()).hexdigest(), hashlib.sha256(payload).hexdigest())
@@ -96,6 +100,50 @@ class ReleaseToolsTests(unittest.TestCase):
             self.assertNotIn('TAURI_SIGNING_PRIVATE_KEY', env)
             self.assertNotIn('UNRELATED_SECRET', env)
             self.assertIn('-ffile-prefix-map=', env['CFLAGS'])
+
+    def test_github_exports_tools_and_adds_prepared_bin_to_following_step_path(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            github_env = root / 'github-env'
+            github_path = root / 'github-path'
+            with patch.dict('os.environ', {'GITHUB_ENV': str(github_env),
+                                           'GITHUB_PATH': str(github_path)}, clear=True):
+                prepare_release_tools._export_github_tools(
+                    root / 'bin' / 'node', root / 'bin' / 'ffprobe',
+                    root / 'toolchain.json', root / 'bin')
+            self.assertEqual(github_env.read_text(),
+                f'SWEATYDL_NODE={root / "bin" / "node"}\n'
+                f'SWEATYDL_FFPROBE={root / "bin" / "ffprobe"}\n'
+                f'SWEATYDL_TOOLCHAIN={root / "toolchain.json"}\n')
+            self.assertEqual(github_path.read_text(), f'{root / "bin"}\n')
+
+    def test_build_diagnostics_are_bounded_and_withhold_sensitive_lines(self):
+        output = (
+            'configure: error: source unavailable at C:\\Users\\runner\\work\\repo\\src\n'
+            'warning: fetch https://user:pass@example.invalid/private.tar.gz failed\n'
+            'error: password="two word value" leaked?\n'
+            'fatal error: Authorization: Bearer abc123\n'
+            'error: PRIVATE_KEY=secret-value\n'
+        )
+        lines = prepare_release_tools._safe_build_diagnostics(output, cwd='C:\\Users\\runner\\work\\repo\\src')
+        self.assertEqual(len(lines), 2)
+        self.assertIn('[PATH]', lines[0])
+        self.assertIn('[URL]', lines[1])
+        self.assertTrue(all(len(line) <= 300 for line in lines))
+        self.assertNotIn('runner', '\n'.join(lines))
+        self.assertNotIn('two word value', '\n'.join(lines))
+        self.assertNotIn('abc123', '\n'.join(lines))
+        self.assertNotIn('secret-value', '\n'.join(lines))
+        self.assertEqual(prepare_release_tools._safe_build_diagnostics(
+            'error: before\n-----BEGIN RSA PRIVATE KEY-----\nsecret\n-----END RSA PRIVATE KEY-----'),
+            ['Compiler diagnostics withheld because a private-key marker was detected.'])
+
+    def test_build_diagnostics_keep_only_last_fifteen_error_or_warning_lines(self):
+        output = '\n'.join(f'warning: compiler diagnostic {index}' for index in range(20))
+        lines = prepare_release_tools._safe_build_diagnostics(output)
+        self.assertEqual(len(lines), 15)
+        self.assertIn('diagnostic 5', lines[0])
+        self.assertIn('diagnostic 19', lines[-1])
 
 
 if __name__ == '__main__':
