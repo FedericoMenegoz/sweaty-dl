@@ -37,6 +37,38 @@ class ReleaseSafetyTests(unittest.TestCase):
                 self.assertNotIn(value.decode(), str(raised.exception))
         release_safety.scan_stream(io.BytesIO(b'ordinary package data'))
 
+    def test_scan_diagnostics_classify_violation_and_show_only_safe_basename(self):
+        cases = [(b'/home/fixture-owner/project', 'local home-path pattern'),
+                 (b'ghp_' + b'X' * 36, 'credential pattern')]
+        for value, kind in cases:
+            with self.subTest(kind=kind), self.assertRaises(ValueError) as raised:
+                release_safety.scan_stream(io.BytesIO(value), 'backend/tools/ffprobe')
+            message = str(raised.exception)
+            self.assertIn(kind, message)
+            self.assertIn('tools/ffprobe', message)
+            self.assertNotIn('fixture-owner', message)
+            self.assertNotIn('ghp_', message)
+        with self.assertRaises(ValueError) as raised:
+            release_safety.scan_stream(io.BytesIO(b'/home/fixture-owner/project'),
+                                       'C:\\Users\\fixture-owner\\secret-token\\ghp_ABCDEF0123456789012345678901')
+        self.assertIn('[entry]', str(raised.exception))
+        self.assertNotIn('fixture-owner', str(raised.exception))
+        self.assertNotIn('ghp_', str(raised.exception))
+
+    def test_archive_scan_diagnostic_names_relative_member_without_match_value(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'SweatyDL-Next_1.0.0_mac-1_x64.app.tar.gz'
+            with tarfile.open(path, 'w:gz') as archive:
+                member = tarfile.TarInfo('SweatyDL Next.app/Contents/Resources/backend/data.bin')
+                value = b'/home/fixture-owner/private-file'
+                member.size = len(value)
+                archive.addfile(member, io.BytesIO(value))
+            with self.assertRaises(ValueError) as raised:
+                release_safety.scan_artifact(path)
+            self.assertIn('local home-path pattern', str(raised.exception))
+            self.assertIn('Resources/backend/data.bin', str(raised.exception))
+            self.assertNotIn('fixture-owner', str(raised.exception))
+
     def test_archive_rejects_owner_metadata_and_path_traversal(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'app.app.tar.gz'

@@ -62,7 +62,13 @@ def stage_assets(source, destination, tag, commit, targets, signed=True, prefix=
                 raise ValueError(f'Package verification failed: {name}/{filename}')
             if (destination / filename).exists():
                 raise ValueError(f'Duplicate release asset: {filename}')
-            scan_artifact(path)
+            try:
+                scan_artifact(path)
+            except ValueError as error:
+                # `filename` already matched the canonical release asset set;
+                # the scanner message carries only a safe member basename and
+                # violation class, never matching bytes or an absolute path.
+                raise ValueError(f'{error} Release asset: {filename}.') from None
             shutil.copyfile(path, destination / filename)
         shutil.copyfile(manifest, destination / f'{name}-build-result.json')
 

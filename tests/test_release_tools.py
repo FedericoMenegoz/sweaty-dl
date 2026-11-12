@@ -124,6 +124,8 @@ class ReleaseToolsTests(unittest.TestCase):
             'error: password="two word value" leaked?\n'
             'fatal error: Authorization: Bearer abc123\n'
             'error: PRIVATE_KEY=secret-value\n'
+            'error: {"private_key": "quoted fixture value"}\n'
+            'warning: ' + 'A' * 80 + '\n'
         )
         lines = prepare_release_tools._safe_build_diagnostics(output, cwd='C:\\Users\\runner\\work\\repo\\src')
         self.assertEqual(len(lines), 2)

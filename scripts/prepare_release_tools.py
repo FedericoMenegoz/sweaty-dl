@@ -268,8 +268,10 @@ def _safe_build_diagnostics(output, env=None, cwd=None, configure_log=''):
                            if env and env.get(key))
     def sanitize(raw):
         line = ''.join(char if char in '\t' or ord(char) >= 32 else ' ' for char in raw)
-        if re.search(r'(?i)\b(?:token|secret|password|private[_ -]?key|authorization|bearer)\b\s*(?:[:=]|\s)|'
+        if re.search(r'(?i)\b(?:token|secret|password|private[_ -]?key|authorization|bearer)\b|'
                      r'\b(?:gh[pousr]_[A-Za-z0-9_]{8,}|github_pat_[A-Za-z0-9_]{8,})\b', line):
+            return None
+        if re.search(r'[A-Za-z0-9+/]{48,}={0,2}', line):
             return None
         for path in sensitive_paths:
             line = re.sub(re.escape(path), '[PATH]', line, flags=re.I)
@@ -278,35 +280,13 @@ def _safe_build_diagnostics(output, env=None, cwd=None, configure_log=''):
                       '[PATH]', line)
         return line[:300]
 
-    diagnostic = re.compile(r'(?i)(?:\berror\b|\bwarning\b|undefined reference|cannot find|'
-                            r'not found|no such file|permission denied|failed|unable|lacks|unrecognized|collect2:|ld\.exe:)')
-    stdout_lines = [safe for raw in output.splitlines() if diagnostic.search(raw)
-                    for safe in [sanitize(raw)] if safe]
-    log_lines = configure_log.splitlines()
-    markers = [i for i, line in enumerate(log_lines)
-               if re.search(r'\btest_cflags_cc\s+-std=c(?:17|11)\b', line)]
-    context = []
-    if markers:
-        for index in markers[-2:]:
-            following = next((position for position in markers if position > index), index + 30)
-            # FFmpeg logs the generated source between test_cc and the actual
-            # compiler command. Retain commands/errors, not the source dump.
-            block = log_lines[index:min(following, index + 30)]
-            context.extend(line for line in block if '-std=c17' in line or '-std=c11' in line
-                           or (diagnostic.search(line) and not re.match(r'\s*\d+\s', line)))
-        failure = next((line for line in reversed(log_lines)
-                        if re.search(r'Compiler lacks C11 support|ERROR:.*failed', line, re.I)), None)
-        if failure:
-            context.append(failure)
-    else:
-        context = [line for line in log_lines[-40:]
-                   if re.search(r'(?i)(?:\berror\b|\bwarning\b|undefined reference|cannot find|'
-                                r'not found|no such file|permission denied|failed|unable|unrecognized|collect2:|ld\.exe:)', line)]
-    safe_context = [line for line in (sanitize(line) for line in context) if line]
+    # Keep configure's own final message plus its final compiler commands.
+    # Earlier feature probes intentionally fail and can obscure the real cause.
+    stdout_lines = [line for line in (sanitize(raw) for raw in output.splitlines()) if line]
+    log_lines = [line for line in (sanitize(raw) for raw in configure_log.splitlines()) if line]
     lines = [f'stdout: {line}' for line in stdout_lines[-3:]]
-    if safe_context:
-        lines.extend(f'configure log: {line}' for line in safe_context[-10:])
-    return [line[:300] for line in lines[-15:]] or ['No safe compiler/configure diagnostics were available.']
+    lines.extend(f'configure log: {line}' for line in log_lines[-9:])
+    return [line[:300] for line in lines] or ['No safe compiler/configure diagnostics were available.']
 
 
 def _run(command, cwd, env, bash=None, windows=False, phase='configure/make'):
