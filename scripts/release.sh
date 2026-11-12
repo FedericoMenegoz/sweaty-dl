@@ -48,9 +48,26 @@ case "${1:-}" in
     # Retrying an older draft must not replace a newer published update feed.
     published_tags="$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
       --jq '.[] | select(.draft == false and .prerelease == false) | .tag_name')"
+    highest_published="$(printf '%s\n' "$published_tags" | python3 -B scripts/release_version.py highest)"
     highest="$(printf '%s\n%s\n' "$published_tags" "$TAG" | python3 -B scripts/release_version.py highest)"
     latest=false
-    if [[ "$highest" == "$TAG" ]]; then latest=true; fi
+    if [[ "$highest" == "$TAG" ]]; then
+      latest=true
+      if [[ -n "$highest_published" ]]; then
+        # A queued run may be based on an older or divergent source commit.
+        # Never let such a run publish a newer update feed than the source of
+        # the highest already-published stable release.
+        if ! git show-ref --verify --quiet "refs/tags/$highest_published"; then
+          echo "::error::Published release $highest_published has no matching Git tag; refusing to publish $TAG as latest."
+          exit 1
+        fi
+        published_sha="$(git rev-parse "$highest_published^{commit}")"
+        if ! git merge-base --is-ancestor "$published_sha" "$GITHUB_SHA"; then
+          echo "::error::$TAG would become latest from a source that does not descend from published $highest_published. Re-run from a commit based on the latest deployment source."
+          exit 1
+        fi
+      fi
+    fi
     if ! git show-ref --verify --quiet "refs/tags/$TAG"; then
       gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
         -f "ref=refs/tags/$TAG" -f "sha=$GITHUB_SHA" > /dev/null

@@ -164,6 +164,32 @@ path.write_text(json.dumps(state))
     def write_manifest(self):
         (self.directory / 'build-result.json').write_text(json.dumps(self.manifest))
 
+    def set_release_version(self, version):
+        old_version = self.manifest['version']
+        for item in self.manifest['artifacts']:
+            source = self.directory / Path(item['file']).name
+            filename = source.name.replace(f'_{old_version}_', f'_{version}_')
+            data = (base64.b64encode(
+                f'untrusted comment: fixture\nfixture\ntrusted comment: version:{version}\nfixture\n'.encode())
+                    if filename.endswith('.sig') else b'installer')
+            source.unlink()
+            destination = source.with_name(filename)
+            destination.write_bytes(data)
+            item.update(file=f'deployments/linux-1/{filename}', bytes=len(data),
+                        sha256=hashlib.sha256(data).hexdigest())
+        self.manifest['version'] = version
+        self.env['TAG'] = f'v{version}'
+        self.write_manifest()
+
+    def add_empty_commit(self, message):
+        self.git('-c', 'user.name=Test', '-c', 'user.email=test@example.invalid',
+                 'commit', '--quiet', '--allow-empty', '-m', message)
+        return self.git('rev-parse', 'HEAD')
+
+    def push_tag(self, tag):
+        self.git('tag', tag)
+        self.git('push', '--quiet', 'origin', f'refs/tags/{tag}')
+
     def run_release(self, command, success=True, **env):
         # Each Actions job starts with a clean staging directory.
         staging = self.repo / 'release-assets'
@@ -284,6 +310,35 @@ path.write_text(json.dumps(state))
         edits = [call for call in state['calls'] if call[:2] == ['release', 'edit']]
         self.assertEqual(len(edits), 1)
         self.assertIn('--latest=false', edits[0])
+
+    def test_new_latest_release_rejects_source_older_than_published_stable(self):
+        published_source = self.add_empty_commit('Published source')
+        self.push_tag('v1.0.0')
+        self.state_file.write_text(json.dumps({'releases': {'v1.0.0': False}, 'calls': []}))
+        self.set_release_version('1.0.1')
+
+        state = self.run_release('publish', success=False)
+
+        self.assertEqual(self.git('rev-parse', 'v1.0.0^{commit}'), published_source)
+        self.assertEqual(self.git('tag', '--list'), 'v1.0.0')
+        self.assertEqual(state['releases'], {'v1.0.0': False})
+        self.assertFalse(any(call[0] == 'release' or '--method' in call
+                             for call in state['calls']))
+
+    def test_new_latest_release_accepts_descendant_of_published_stable(self):
+        self.push_tag('v1.0.0')
+        candidate_source = self.add_empty_commit('Candidate source')
+        self.env['GITHUB_SHA'] = candidate_source
+        self.manifest['source_commit'] = candidate_source
+        self.state_file.write_text(json.dumps({'releases': {'v1.0.0': False}, 'calls': []}))
+        self.set_release_version('1.0.1')
+
+        state = self.run_release('publish')
+
+        self.assertEqual(self.git('rev-parse', 'v1.0.1^{commit}'), candidate_source)
+        self.assertEqual(state['releases'], {'v1.0.0': False, 'v1.0.1': False})
+        edit = next(call for call in state['calls'] if call[:2] == ['release', 'edit'])
+        self.assertIn('--latest=true', edit)
 
     def test_bad_or_missing_build_outputs_never_create_tag_or_release(self):
         for field, value in (('status', 'failed'), ('source_commit', 'wrong'),

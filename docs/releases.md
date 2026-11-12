@@ -80,6 +80,11 @@ unpublished draft and its tag; rerunning resumes the same
 version and replaces incomplete draft assets. Once published, the same tagged
 commit is a no-op on retries. Existing tags are never moved.
 
+Queue ordering is not guaranteed. A release that would become latest must descend
+from the source tagged by the highest published stable release. Stale or divergent
+runs fail before creating a tag or release. Older draft retries can still publish
+without replacing the latest update feed.
+
 Use **Re-run all jobs** to retry a failed run. If another release used its
 previously calculated version while it was failed, rerunning all jobs selects
 the current next version and rebuilds consistently. A retry of only failed jobs
