@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import shutil
 import socket
+import stat
 import sys
 import tempfile
 import threading
@@ -115,8 +116,30 @@ def measured_duration(path):
     return float(json.loads(result.stdout)['format']['duration'])
 
 
+@contextlib.contextmanager
+def _regular_file(path, *, dir_fd=None):
+    """Open existing audio without following links or blocking on a FIFO."""
+    flags = os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0) | getattr(os, 'O_NONBLOCK', 0)
+    try:
+        metadata = os.stat(path, dir_fd=dir_fd, follow_symlinks=False)
+        if not stat.S_ISREG(metadata.st_mode) or getattr(metadata, 'st_file_attributes', 0) & 0x400:
+            raise UserError('Audio paths must be regular files, not links or special files.')
+        descriptor = os.open(path, flags, dir_fd=dir_fd)
+    except OSError:
+        raise UserError('Unable to open audio safely.') from None
+    with os.fdopen(descriptor, 'rb') as stream:
+        if not os.path.samestat(metadata, os.fstat(stream.fileno())):
+            raise UserError('Audio file changed during publication. Try again.')
+        yield stream
+
+
 def publish(path, folder, filename, expected):
     check_cancel()
+    if (not isinstance(filename, str) or filename in ('', '.', '..')
+            or any(c in filename for c in '/\\:\0') or Path(filename).name != filename):
+        raise UserError('Invalid audio filename.')
+    with _regular_file(path):
+        pass
     diag.stage('verify_duration', expected_seconds=expected, bytes=path.stat().st_size)
     actual = measured_duration(path)
     diag.log('audio_duration', actual_seconds=actual, expected_seconds=expected)
@@ -126,17 +149,39 @@ def publish(path, folder, filename, expected):
     target = folder / filename
     # Hard-link publication is atomic and cannot overwrite an existing file.
     # The temporary directory lives on the same volume as the destination.
+    directory = None
+    created = False
     try:
-        os.link(path, target)
-    except FileExistsError:
-        def digest(file):
+        metadata = folder.lstat()
+        if not stat.S_ISDIR(metadata.st_mode) or getattr(metadata, 'st_file_attributes', 0) & 0x400:
+            raise UserError('The audio folder must not be a link.')
+        # Pin the provider folder on POSIX so replacing it with a symlink after
+        # validation cannot redirect the link or the existing-file comparison.
+        if os.link in os.supports_dir_fd and os.open in os.supports_dir_fd:
+            directory = os.open(folder, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+            if not os.path.samestat(metadata, os.fstat(directory)):
+                raise UserError('The audio folder changed. Try again.')
+        def digest(file, **kwargs):
             result = hashlib.sha256()
-            with file.open('rb') as stream:
+            with _regular_file(file, **kwargs) as stream:
                 for block in iter(lambda: stream.read(1024 * 1024), b''):
+                    check_cancel()
                     result.update(block)
             return result.digest()
-        if digest(path) != digest(target):
-            raise UserError('The file already exists in the destination; it was not overwritten.') from None
+        try:
+            os.link(path, filename if directory is not None else target,
+                    dst_dir_fd=directory, follow_symlinks=False)
+            created = True
+        except FileExistsError:
+            if digest(path) != digest(filename if directory is not None else target, dir_fd=directory):
+                raise UserError('The file already exists in the destination; it was not overwritten.') from None
+        if directory is not None and not os.path.samestat(folder.lstat(), os.fstat(directory)):
+            if created:
+                os.unlink(filename, dir_fd=directory)
+            raise UserError('The audio folder changed. Try again.')
+    finally:
+        if directory is not None:
+            os.close(directory)
     path.unlink()
     return str(target)
 
