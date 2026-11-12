@@ -6,7 +6,11 @@ __pycache__/
 .logs/
 
 .build/
+.release-keys/
 deployments/
+workflow-artifacts/
+signed-deployments/
+release-assets/
 src-tauri/resources/backend/
 src-tauri/gen/
 .venv/

@@ -53,8 +53,11 @@ li button { flex-shrink: 0; padding: 7px; font-size: 12px; }
 .destination-picker { display: flex; gap: 6px; }
 .destination-picker input { flex: 1; min-width: 0; }
 .destination-picker button { flex-shrink: 0; }
-footer { display: flex; align-items: center; justify-content: space-between; }
-#show-diagnostics { font-size: 11px; padding: 3px 10px; background: #252d23; color: #c6cbbf; }
+footer { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+#update-status { flex: 1; text-align: right; }
+#update-app, #show-diagnostics { font-size: 11px; padding: 4px 10px; }
+#update-app:disabled { cursor: default; }
+#show-diagnostics { background: #252d23; color: #c6cbbf; }
 #diagnostic-dialog { color: #e5e5dc; background: #20251f; border: 1px solid #59634d; border-radius: 12px; padding: 18px; width: min(860px, 92vw); max-height: 85dvh; }
 #diagnostic-dialog::backdrop { background: #0009; }
 #diagnostic-status { font-size: 12px; overflow-wrap: anywhere; }

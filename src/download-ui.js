@@ -37,7 +37,7 @@ export function parseUrlText(text, existing = []) {
   return { added, duplicates, invalid };
 }
 
-export function initDownloads({ document, invoke, isTauri, getQueue, save, stopPreview, storage, listen, canStart = () => true, diagnose = () => {} }) {
+export function initDownloads({ document, invoke, isTauri, getQueue, save, stopPreview, storage, listen, canStart = () => true, diagnose = () => {}, onBusyChange = () => {} }) {
   const input = document.querySelector('#url-file');
   const message = document.querySelector('#download-status');
   const destination = document.querySelector('#destination');
@@ -52,6 +52,7 @@ export function initDownloads({ document, invoke, isTauri, getQueue, save, stopP
     const locked = busy || importing || !canStart();
     start.disabled = locked; choose.disabled = locked; cancel.hidden = !busy; input.disabled = locked; destination.disabled = locked;
     for (const button of document.querySelectorAll?.('#queue button, #results button') || []) button.disabled = locked;
+    onBusyChange();
   };
   choose.onclick = async () => {
     if (busy || importing || !canStart() || !isTauri()) return;

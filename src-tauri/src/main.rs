@@ -106,11 +106,20 @@ async fn search(
     result
 }
 
+#[tauri::command]
+fn restart_app(webview: Webview) -> Result<(), String> {
+    require_local(&webview, false)?;
+    download::shutdown(webview.app_handle());
+    media_resolver::shutdown(webview.app_handle());
+    webview.app_handle().restart();
+}
+
 fn main() {
     if let Some(code) = runtime::run_package_self_test() {
         std::process::exit(code);
     }
     tauri::Builder::default()
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(bandcamp_window::BandcampSession::default())
         .manage(preview::PreviewState::default())
         .manage(download::DownloadState::default())
@@ -129,6 +138,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             search,
+            restart_app,
             media_resolver::resolve_media_url,
             diagnostics::diagnostic_event,
             diagnostics::diagnostic_report,

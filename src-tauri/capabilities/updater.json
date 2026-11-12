@@ -1,0 +1,7 @@
+{
+  "identifier": "updater",
+  "description": "Check and install signed updates from the local main window only.",
+  "local": true,
+  "webviews": ["main"],
+  "permissions": ["updater:allow-check", "updater:allow-download-and-install"]
+}

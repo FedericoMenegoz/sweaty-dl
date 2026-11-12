@@ -1,9 +1,12 @@
 import { getCurrentWebview } from '@tauri-apps/api/webview';
 import { isTauri } from '@tauri-apps/api/core';
+import { getVersion } from '@tauri-apps/api/app';
+import { check } from '@tauri-apps/plugin-updater';
 import { invokeLogged as invoke, initDiagnostics, recordDiagnostic } from './diagnostics.js';
 import { initDownloads } from './download-ui.js';
 import { canPreview, createPreviewPlayer } from './preview-player.js';
 import { classifyMediaInput, bandcampReference, resolvedMediaItems, mergeMediaQueue } from './media-input.js';
+import { initUpdates } from './update-ui.js';
 
 const app = document.querySelector('#app');
 app.innerHTML = `
@@ -29,7 +32,8 @@ app.innerHTML = `
   </div>
   <div id="download-feedback"><p id="download-status" role="status">TXT: one HTTPS URL per line, including different sources supported by the extractor.</p>
     <progress id="download-progress" max="1" hidden aria-label="Download progress"></progress></div>
-  <footer><span>SweatyDL · development version</span><button type="button" id="show-diagnostics">Log</button></footer>
+  <footer><span id="app-version">SweatyDL</span><span id="update-status" role="status" aria-live="polite"></span>
+    <button type="button" id="update-app" disabled>Update app</button><button type="button" id="show-diagnostics">Log</button></footer>
   <dialog id="diagnostic-dialog" aria-labelledby="diagnostic-title"><h2 id="diagnostic-title">Diagnostics</h2>
     <p id="diagnostic-status" role="status"></p>
     <textarea id="diagnostic-content" readonly spellcheck="false" aria-label="Log events"></textarea>
@@ -39,6 +43,8 @@ app.innerHTML = `
 initDiagnostics(document);
 let queue = [];
 let searchBusy = false;
+let installingUpdate = false;
+let updates;
 try {
   const saved = JSON.parse(localStorage.getItem('sweatydl-next-queue') || '[]');
   if (Array.isArray(saved)) queue = saved.filter(validTrack).map(track => ({ ...track, downloadStatus: track.downloadStatus === 'running' ? 'pending' : track.downloadStatus }));
@@ -78,7 +84,7 @@ function row(track, label, action) {
     : track.downloadStatus === 'error' ? ` · ${track.downloadError}` : '';
   text.textContent = `${track.title} — ${track.artist || ''} (${track.source || ''})${downloadLabel}`;
   const button = document.createElement('button');
-  button.type = 'button'; button.textContent = label; button.onclick = () => { if (!searchBusy && !downloads.busy()) action(); };
+  button.type = 'button'; button.textContent = label; button.onclick = () => { if (!searchBusy && !downloads.busy() && !installingUpdate) action(); };
   li.append(text);
   if (canPreview(track)) {
     const listen = document.createElement('button');
@@ -87,7 +93,7 @@ function row(track, label, action) {
     listen.dataset.url = track.url;
     listen.dataset.title = track.title;
     listen.setAttribute('aria-label', `Preview: ${track.title}`);
-    listen.onclick = () => { if (!searchBusy && !downloads.busy()) preview.toggle(track); };
+    listen.onclick = () => { if (!searchBusy && !downloads.busy() && !installingUpdate) preview.toggle(track); };
     previewButtons.add(listen);
     li.append(listen);
   }
@@ -103,12 +109,28 @@ function renderQueue() {
 }
 renderQueue();
 const downloads = initDownloads({ document, invoke, isTauri, getQueue: () => queue, save: renderQueue,
-  stopPreview: () => preview.stop(''), storage: localStorage, canStart: () => !searchBusy,
+  stopPreview: () => preview.stop(''), storage: localStorage, canStart: () => !searchBusy && !installingUpdate,
+  onBusyChange: () => updates?.refresh(),
   listen: (name, handler) => getCurrentWebview().listen(name, handler),
   diagnose: recordDiagnostic,
 });
+updates = initUpdates({ document, isTauri, getVersion, check,
+  restart: () => invoke('restart_app'),
+  canInstall: () => !searchBusy && !downloads.busy(),
+  setInstalling: value => {
+    installingUpdate = value;
+    document.querySelector('#search-button').disabled = searchBusy || value;
+    downloads.updateControls();
+  },
+  beforeInstall: () => {
+    preview.stop('');
+    if (!renderQueue()) throw new Error('Unable to save the download queue.');
+    downloads.updateControls();
+  },
+  diagnose: recordDiagnostic,
+});
 function showResults(report) {
-  if (downloads.busy()) return 0;
+  if (downloads.busy() || installingUpdate) return 0;
   preview.stop('');
   const results = report.results.filter(validTrack);
   document.querySelector('#results').replaceChildren(...results.map(track => row(track, 'Save', () => {
@@ -132,7 +154,7 @@ document.querySelector('#close-bandcamp').onclick = async () => {
 };
 document.querySelector('#search').onsubmit = async event => {
   event.preventDefault();
-  if (searchBusy || downloads.busy()) return;
+  if (searchBusy || downloads.busy() || installingUpdate) return;
   if (!isTauri()) { status.textContent = 'Search requires npm run tauri dev.'; return; }
   preview.stop('');
   searchBusy = true;
@@ -184,12 +206,12 @@ document.querySelector('#search').onsubmit = async event => {
 
 if (isTauri()) {
   getCurrentWebview().listen('bandcamp-results-imported', ({ payload: report }) => {
-    if (downloads.busy()) return;
+    if (downloads.busy() || installingUpdate) return;
     const count = showResults(report);
     status.textContent = `${count} results imported from the Bandcamp page. Press «Save» on the items you want to keep.`;
   }).catch(error => { status.textContent = `Bandcamp import unavailable: ${error}`; });
   getCurrentWebview().listen('bandcamp-confirmed', ({ payload: report }) => {
-    if (downloads.busy()) return;
+    if (downloads.busy() || installingUpdate) return;
     const selected = report.results.filter(validTrack);
     showResults(report);
     try {

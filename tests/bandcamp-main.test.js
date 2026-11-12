@@ -7,7 +7,7 @@ import { initDownloads } from '../src/download-ui.js';
 import { canPreview, createPreviewPlayer } from '../src/preview-player.js';
 import { classifyMediaInput, bandcampReference, resolvedMediaItems, mergeMediaQueue } from '../src/media-input.js';
 
-function mainHarness(invoke = async () => { throw new Error('Unexpected command'); }, initialQueue = [], failPersistence = false) {
+function mainHarness(invoke = async () => { throw new Error('Unexpected command'); }, initialQueue = [], failPersistence = false, onUpdates = () => {}) {
   const source = readFileSync(new URL('../src/main-app.js', import.meta.url), 'utf8')
     .replace(/^import[^\r\n]*;[ \t]*\r?$/gm, '');
   const elements = new Map();
@@ -24,6 +24,9 @@ function mainHarness(invoke = async () => { throw new Error('Unexpected command'
     canPreview, createPreviewPlayer, initDownloads, initDiagnostics, recordDiagnostic,
     classifyMediaInput, bandcampReference, resolvedMediaItems, mergeMediaQueue,
     invoke,
+    initUpdates: options => { onUpdates(options); return { refresh() {} }; },
+    getVersion: async () => '0.1.1',
+    check: async () => null,
     FormData: class {
       constructor(target) { this.input = target.input; }
       [Symbol.iterator]() { return Object.entries(this.input)[Symbol.iterator](); }
@@ -131,6 +134,24 @@ test('an explicitly empty result completes the automatic search', async () => {
 const youtubeTrack = (id = 'abcdefghijk') => ({ title: `Song ${id}`, artist: 'Artist', source: 'YouTube', kind: 'track', url: `https://www.youtube.com/watch?v=${id}` });
 const playlistReport = () => ({ source: 'YouTube', kind: 'playlist', title: 'Playlist', url: 'https://www.youtube.com/playlist?list=PL_collection', results: [youtubeTrack(), youtubeTrack('lmnopqrstuv')], unavailable_count: 1, warnings: ['One item is unavailable.'], complete: true });
 const latestQueue = view => JSON.parse(view.saved.at(-1));
+
+test('saving the queue for an app update keeps search, downloads and queue edits locked', async () => {
+  let updates;
+  const calls = [];
+  const view = mainHarness(async command => { calls.push(command); }, [youtubeTrack()], false,
+    options => { updates = options; });
+  updates.setInstalling(true);
+  updates.beforeInstall();
+  assert.equal(view.elements.get('#search-button').disabled, true);
+  assert.equal(view.elements.get('#download-start').disabled, true);
+  assert.equal(view.elements.get('#url-file').disabled, true);
+  assert.equal(view.elements.get('#queue').children[0].children.at(-1).disabled, true);
+  await view.submit({ title: 'Song', artist: '', mode: 'SoundCloud' });
+  assert.deepEqual(calls, []);
+  updates.setInstalling(false);
+  assert.equal(view.elements.get('#search-button').disabled, false);
+  assert.equal(view.elements.get('#download-start').disabled, false);
+});
 
 test('playlist URL overrides text source/artist, imports ordered references and waits for Download', async () => {
   const calls = [];
