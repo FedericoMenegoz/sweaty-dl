@@ -111,7 +111,8 @@ def measured_duration(path):
     if not probe:
         raise UserError('ffprobe is required to check the duration of this audio format.')
     import subprocess
-    result = subprocess.run([probe, '-v', 'error', '-show_entries', 'format=duration',
+    result = subprocess.run([probe, '-v', 'error', '-protocol_whitelist', 'file',
+                             '-show_entries', 'format=duration',
                              '-of', 'json', str(path)], capture_output=True, timeout=20, check=True)
     return float(json.loads(result.stdout)['format']['duration'])
 
@@ -250,6 +251,8 @@ class QuietLogger:
 def extracted_audio(url, temporary, destination):
     from yt_dlp import YoutubeDL
     from yt_dlp.networking._urllib import UrllibRH, RedirectHandler
+    from yt_dlp.downloader.external import FFmpegFD
+    from yt_dlp.postprocessor.ffmpeg import FFmpegPostProcessor
     public_url(url)
     last = 0
 
@@ -273,9 +276,17 @@ def extracted_audio(url, temporary, destination):
         'logger': QuietLogger(), 'progress_hooks': [progress], 'quiet': True,
         'noprogress': True, 'proxy': '', 'external_downloader': None,
         'postprocessors': [], 'fixup': 'never', 'hls_prefer_native': True,
+        # Never discover an unbundled FFmpeg/FFprobe through yt-dlp.
+        'ffmpeg_location': str(temporary / 'external-tools-disabled'),
     }
     options.update(javascript_options())
     original_redirect = RedirectHandler.redirect_request
+    original_external_transfer = FFmpegFD.real_download
+
+    def reject_external_transfer(*args, **kwargs):
+        # HlsFD can delegate unsupported manifests despite external_downloader=None.
+        # Such a subprocess would bypass the Python socket/redirect guards.
+        raise UserError('This stream requires an unsupported external transfer. No file was saved.')
 
     def redirect(handler, req, fp, code, msg, headers, newurl):
         public_url(newurl)
@@ -287,10 +298,16 @@ def extracted_audio(url, temporary, destination):
             return super().urlopen(request)
 
     RedirectHandler.redirect_request = redirect
+    FFmpegFD.real_download = reject_external_transfer
+    # Native HLS also probes FFmpeg through a postprocessor without a downloader
+    # instance; it cannot see the per-instance ffmpeg_location option above.
+    location_token = FFmpegPostProcessor._ffmpeg_location.set(options['ffmpeg_location'])
     try:
         return extract_with(Downloader, UrllibRH, options, url, temporary, destination)
     finally:
         RedirectHandler.redirect_request = original_redirect
+        FFmpegFD.real_download = original_external_transfer
+        FFmpegPostProcessor._ffmpeg_location.reset(location_token)
 
 
 def extract_with(Downloader, UrllibRH, options, url, temporary, destination):

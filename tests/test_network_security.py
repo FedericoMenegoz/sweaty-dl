@@ -126,6 +126,14 @@ class NetworkSecurityTests(unittest.TestCase):
         with download._public_session() as session:
             self.assertFalse(session.trust_env)
 
+    def test_ffprobe_receives_local_only_protocol_allowlist(self):
+        completed = MagicMock(stdout=b'{"format":{"duration":"2.0"}}')
+        with patch('mutagen.File', return_value=None), patch.object(download, 'tool', return_value='/fixture/ffprobe'), patch('subprocess.run', return_value=completed) as run:
+            self.assertEqual(download.measured_duration(Path('/fixture/audio.webm')), 2)
+        arguments = run.call_args.args[0]
+        self.assertEqual(arguments[arguments.index('-protocol_whitelist') + 1], 'file')
+        self.assertTrue(run.call_args.kwargs['check'])
+        self.assertEqual(run.call_args.kwargs['timeout'], 20)
 
 
 if __name__ == '__main__':
