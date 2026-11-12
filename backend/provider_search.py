@@ -98,7 +98,8 @@ def bandcamp_search(query):
         response.raise_for_status()
         return parse_bandcamp(response.text)
     except requests.RequestException as error:
-        raise SearchError(f'Unable to reach Bandcamp: {error}') from error
+        # Transport exceptions can contain signed URLs, credentials, or local paths.
+        raise SearchError('Unable to reach Bandcamp. Check your network and try again.') from error
 
 
 def ytdlp_search(source, query):
@@ -138,7 +139,7 @@ def ytdlp_search(source, query):
     except SearchError:
         raise
     except Exception as error:
-        raise SearchError(f'{source}: {error}') from error
+        raise SearchError(f'Unable to search {source}. Check your network and content availability.') from error
 
 
 def search_tracks(title, artist='', mode='auto', notify=lambda _: None, providers=None):

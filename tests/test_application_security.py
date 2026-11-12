@@ -85,6 +85,29 @@ class PublicationSecurityTests(unittest.TestCase):
         self.assertTrue(self.audio.exists())
 
 
+class ProviderErrorSecurityTests(unittest.TestCase):
+    def test_bandcamp_error_does_not_disclose_transport_details(self):
+        import requests
+        detail = 'https://cdn.example/audio?token=FIXTURE_ONLY /private/fixture-user/audio'
+        with patch('requests.get', side_effect=requests.RequestException(detail)):
+            report = provider_search.search_tracks('Fixture', mode='Bandcamp')
+        self.assertEqual(report.searched, ['Bandcamp'])
+        self.assertIn('Bandcamp', report.errors)
+        self.assertNotIn('FIXTURE_ONLY', str(report.errors))
+        self.assertNotIn('fixture-user', str(report.errors))
+
+    def test_extractor_errors_do_not_disclose_transport_details(self):
+        from yt_dlp import YoutubeDL
+        for source in ('SoundCloud', 'YouTube'):
+            with self.subTest(source=source), patch.object(
+                    YoutubeDL, 'extract_info', side_effect=RuntimeError(
+                        'https://cdn.example/audio?token=FIXTURE_ONLY /private/fixture-user/audio')):
+                report = provider_search.search_tracks('Fixture', mode=source)
+                self.assertEqual(report.searched, [source])
+                self.assertIn(source, report.errors)
+                self.assertNotIn('FIXTURE_ONLY', str(report.errors))
+                self.assertNotIn('fixture-user', str(report.errors))
+
 
 class RuntimeDiscoverySecurityTests(unittest.TestCase):
     def test_missing_bundled_runtime_does_not_enable_path_fallback(self):
@@ -96,7 +119,6 @@ class RuntimeDiscoverySecurityTests(unittest.TestCase):
             discover.assert_not_called()
         with YoutubeDL({'quiet': True, **options}) as downloader:
             self.assertEqual(downloader.params['js_runtimes'], {})
-
 
 
 if __name__ == '__main__':
