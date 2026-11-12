@@ -117,6 +117,13 @@ class ReleaseToolsTests(unittest.TestCase):
                 f'SWEATYDL_TOOLCHAIN={root / "toolchain.json"}\n')
             self.assertEqual(github_path.read_text(), f'{root / "bin"}\n')
 
+    def test_windows_environment_selects_native_ucrt_not_msys_runtime(self):
+        with tempfile.TemporaryDirectory() as directory:
+            env = prepare_release_tools._clean_environment(Path(directory), 'Windows')
+            self.assertEqual(env['MSYSTEM'], 'UCRT64')
+            self.assertIn(r'C:\mingw64\bin', env['PATH'])
+            self.assertNotIn('GITHUB_TOKEN', env)
+
     def test_build_diagnostics_are_bounded_and_withhold_sensitive_lines(self):
         output = (
             'configure: error: source unavailable at C:\\Users\\runner\\work\\repo\\src\n'

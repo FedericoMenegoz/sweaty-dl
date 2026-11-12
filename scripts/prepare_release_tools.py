@@ -220,7 +220,7 @@ def _clean_environment(work, platform_name, compiler_dir=None):
             env[key] = os.environ[key]
     if platform_name == 'Windows':
         msys = Path(r'C:\msys64')
-        env.update({'MSYSTEM': 'MSYS', 'CHERE_INVOKING': 'yes', 'HOME': str(work),
+        env.update({'MSYSTEM': 'UCRT64', 'CHERE_INVOKING': 'yes', 'HOME': str(work),
                     'PATH': r'C:\mingw64\bin' + ';' + str(msys / 'usr' / 'bin'),
                     'SHELL': str(msys / 'usr' / 'bin' / 'bash.exe')})
     else:
@@ -473,7 +473,8 @@ def prepare(config_path=CONFIG, system=None):
         compiler_id = _compiler_identity(compiler, env)
         config_command = ['./configure', *FFPROBE_CONFIG]
         if system == 'Windows':
-            config_command.append('--extra-ldflags=-static -static-libgcc')
+            config_command.extend(['--target-os=mingw32', '--arch=x86_64',
+                                   '--extra-ldflags=-static -static-libgcc'])
         effective_config = config_command[1:]
         if system == 'Windows':
             _run(config_command, source, env, bash=bash, windows=True, phase='configure')
