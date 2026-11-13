@@ -11,7 +11,7 @@ import zipfile
 PRIVATE_DATA = re.compile(
     rb'-----BEGIN (?:RSA |EC |OPENSSH |ENCRYPTED )?PRIVATE KEY-----\s+[A-Za-z0-9+/]{32}'
     rb'|\b(?:gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{40,})\b')
-LOCAL_HOME = re.compile(rb'(?:/Users/|/home/|[A-Z]:\\Users\\)(?!runner(?:[ /\\]|$)|Public[ /\\]|Default[ /\\])[^\s/\\\x00]{2,}')
+LOCAL_HOME = re.compile(rb'(?:/Users/|/home/|[A-Z]:\\Users\\)(?!runner(?:[ /\\\x00]|$)|Public[ /\\\x00]|Default[ /\\\x00])[^\s/\\\x00]{2,}')
 
 
 def _safe_label(value):
@@ -20,7 +20,7 @@ def _safe_label(value):
     parts = path.parts
     if not parts or path.is_absolute() or '..' in parts:
         return '[entry]'
-    if any(not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._+() -]{0,79}', part)
+    if any(not re.fullmatch(r'[A-Za-z0-9_][A-Za-z0-9._+() -]{0,79}', part)
            or re.search(r'(?i)(?:token|secret|password|private|credential|(?:^|[._-])home(?:$|[._-]))', part)
            or re.search(r'(?i)^(?:home|users|runneradmin)$', part)
            or re.search(r'(?i)(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{30,})', part)

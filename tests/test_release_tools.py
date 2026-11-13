@@ -1,6 +1,7 @@
 import hashlib
 import io
 import os
+import os
 from pathlib import Path
 import sys
 import tarfile
@@ -94,8 +95,8 @@ class ReleaseToolsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory, patch.dict('os.environ', {
                 'PATH': '/private/path', 'GITHUB_TOKEN': 'fixture-token',
                 'TAURI_SIGNING_PRIVATE_KEY': 'fixture-key', 'UNRELATED_SECRET': 'fixture-secret'}, clear=True):
-            env = prepare_release_tools._clean_environment(Path(directory), 'Linux', Path('/usr/bin'))
-            self.assertEqual(env['PATH'], '/usr/bin:/bin')
+            env = prepare_release_tools._clean_environment(Path(directory), 'Linux')
+            self.assertEqual(env['PATH'].split(os.pathsep), ['/usr/bin', '/bin'])
             self.assertNotIn('GITHUB_TOKEN', env)
             self.assertNotIn('TAURI_SIGNING_PRIVATE_KEY', env)
             self.assertNotIn('UNRELATED_SECRET', env)

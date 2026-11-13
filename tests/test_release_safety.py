@@ -22,6 +22,17 @@ import updater_manifest
 
 
 class ReleaseSafetyTests(unittest.TestCase):
+    def test_nul_terminated_public_runner_home_keeps_exact_component_boundary(self):
+        for value in (b'/home/runner\0', b'/Users/runner\0', b'C:\\Users\\runner\0'):
+            release_safety.scan_stream(io.BytesIO(value))
+        for value in (b'/home/runner-other\0', b'/Users/fixture-owner\0', b'C:\\Users\\fixture-owner\0'):
+            with self.subTest(value=value[:6]), self.assertRaises(ValueError):
+                release_safety.scan_stream(io.BytesIO(value))
+
+    def test_safe_internal_package_path_can_be_identified_without_payload(self):
+        self.assertEqual(release_safety._safe_label('_internal/Python.framework/Versions/3.13/Python'),
+                         'Versions/3.13/Python')
+
     def test_release_build_cannot_reuse_a_backend_from_another_source(self):
         with patch.dict(os.environ, {'SWEATYDL_RELEASE_BUILD': '1'}):
             with self.assertRaisesRegex(RuntimeError, 'freshly packaged backend'):
