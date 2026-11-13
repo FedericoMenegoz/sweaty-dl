@@ -22,6 +22,14 @@ import updater_manifest
 
 
 class ReleaseSafetyTests(unittest.TestCase):
+    def test_scan_reports_offset_across_read_boundaries_without_path_bytes(self):
+        prefix = b'\0' * (1024 * 1024 - 3)
+        value = prefix + b'/home/fixture-owner/source\0'
+        with self.assertRaises(ValueError) as raised:
+            release_safety.scan_stream(io.BytesIO(value), 'package.AppImage')
+        self.assertIn(f'at byte offset {len(prefix)}', str(raised.exception))
+        self.assertNotIn('fixture-owner', str(raised.exception))
+
     def test_nul_terminated_public_runner_home_keeps_exact_component_boundary(self):
         for value in (b'/home/runner\0', b'/Users/runner\0', b'C:\\Users\\runner\0'):
             release_safety.scan_stream(io.BytesIO(value))

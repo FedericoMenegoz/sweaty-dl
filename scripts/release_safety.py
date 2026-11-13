@@ -29,8 +29,10 @@ def _safe_label(value):
     return '/'.join(parts[-3:])[-120:]
 
 
-def _scan_error(kind, label=None):
+def _scan_error(kind, label=None, offset=None):
     where = f' in {_safe_label(label)}' if label else ''
+    if offset is not None:
+        where += f' at byte offset {offset}'
     return ValueError(f'Artifact contains a {kind}{where}.')
 
 
@@ -59,25 +61,29 @@ def check_link(name, linkname, hardlink=False):
 def scan_stream(stream, label=None):
     tail = b''
     digest = hashlib.sha256()
-    home_path = False
+    home_offset = None
+    scanned_bytes = 0
     while True:
         block = stream.read(1024 * 1024)
         if not block:
-            if home_path:
+            if home_offset is not None:
                 # Prepared Node binaries contain upstream build paths. Allow
                 # only the exact reviewed images derived from signed archives;
                 # any byte change restores the ordinary home-path rejection.
                 pins = Path(__file__).resolve().parents[1] / 'deployment/toolchain.json'
                 reviewed = json.loads(pins.read_text())['node']['platforms'] if pins.is_file() else {}
                 if digest.hexdigest() not in {item.get('packaged_sha256', item['binary_sha256']) for item in reviewed.values()}:
-                    raise _scan_error('local home-path pattern', label)
+                    raise _scan_error('local home-path pattern', label, home_offset)
             return
         digest.update(block)
         data = tail + block
         if PRIVATE_DATA.search(data):
             # Never include the match in errors or CI logs.
             raise _scan_error('credential pattern', label)
-        home_path |= bool(LOCAL_HOME.search(data))
+        match = LOCAL_HOME.search(data)
+        if home_offset is None and match:
+            home_offset = scanned_bytes - len(tail) + match.start()
+        scanned_bytes += len(block)
         tail = data[-4096:]
 
 
