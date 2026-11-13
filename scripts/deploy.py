@@ -199,7 +199,7 @@ def build(profile, skip_backend=False, updater=False):
         archive = directory / f'SweatyDL-Next_{version}_{profile["name"]}_x64.app.zip'
         make_app_zip(app, archive)
         artifacts.append(archive)
-        (directory / 'verified-artifacts.json').write_text(json.dumps([{'file': str(archive.relative_to(ROOT)), 'bytes': archive.stat().st_size, 'sha256': sha256(archive)}], indent=2))
+        (directory / 'verified-artifacts.json').write_text(json.dumps([{'file': archive.relative_to(ROOT).as_posix(), 'bytes': archive.stat().st_size, 'sha256': sha256(archive)}], indent=2))
         if 'dmg' in profile['formats']:
             stage = ROOT / '.build' / f'dmg-{profile["name"]}'
             if stage.exists():
@@ -230,7 +230,7 @@ def build(profile, skip_backend=False, updater=False):
             artifacts.append(destination)
     if updater:
         prepare_update(profile, artifacts, version)
-    return [{'file': str(path.relative_to(ROOT)), 'bytes': path.stat().st_size, 'sha256': sha256(path)} for path in artifacts]
+    return [{'file': path.relative_to(ROOT).as_posix(), 'bytes': path.stat().st_size, 'sha256': sha256(path)} for path in artifacts]
 
 
 def main():
@@ -269,7 +269,7 @@ def main():
             if (target['os'], target['arch']) != (HOST_OS.get(platform.system()), HOST_ARCH.get(platform.machine())):
                 result.update(status='blocked', reason='Requires the matching native build OS/architecture; this host cannot freeze that Python backend.')
                 kit = build_kit(OUTPUT / target['name'] / f"{target['name']}-build-kit.zip")
-                result['build_kit'] = str(kit.relative_to(ROOT))
+                result['build_kit'] = kit.relative_to(ROOT).as_posix()
             else:
                 result['artifacts'] = build(target, args.skip_backend, args.updater)
                 result['status'] = 'built-needs-installation-test'

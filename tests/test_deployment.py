@@ -14,9 +14,42 @@ sys.path.insert(0, str(ROOT / 'backend'))
 import deploy
 import provider_search
 import runtime_tools
+import updater_manifest
 
 
 class DeploymentTests(unittest.TestCase):
+    def test_windows_build_manifest_stages_with_portable_paths_and_verified_bytes(self):
+        import package_backend
+        profile = next(item for item in deploy.profiles() if item['os'] == 'windows')
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'package.json').write_text('{"version":"1.2.3"}')
+            resources = root / 'backend'
+            resources.mkdir()
+            (resources / 'build-info.json').write_text(json.dumps({
+                'ok': True, 'frozen': True, 'os': 'Windows', 'arch': 'AMD64'}))
+            bundle = root / 'src-tauri/target' / profile['target'] / 'release/bundle/nsis'
+            bundle.mkdir(parents=True)
+            (bundle / 'package.exe').write_bytes(b'installer fixture')
+            output = root / 'deployments'
+            with patch.object(deploy, 'ROOT', root), patch.object(deploy, 'OUTPUT', output), \
+                    patch.object(package_backend, 'RESOURCES', resources), \
+                    patch('deploy.platform.system', return_value='Windows'), \
+                    patch('deploy.shutil.which', return_value='npm.cmd'), patch.object(deploy, 'run'):
+                artifacts = deploy.build(profile, skip_backend=True, updater=True)
+            filename = 'SweatyDL-Next_1.2.3_windows-1_x64-setup.exe'
+            self.assertEqual(artifacts[0]['file'], f'deployments/windows-1/{filename}')
+            (output / 'windows-1/build-result.json').write_text(json.dumps({
+                'profile': 'windows-1', 'version': '1.2.3', 'source_commit': 'a' * 40,
+                'status': 'built-needs-installation-test', 'artifacts': artifacts}))
+            updater_manifest.stage_assets(output, root / 'assets', 'v1.2.3',
+                                           'a' * 40, [profile], signed=False, prefix='')
+            self.assertEqual((root / 'assets' / filename).read_bytes(), b'installer fixture')
+            (output / 'windows-1' / filename).write_bytes(b'changed installer')
+            with self.assertRaisesRegex(ValueError, 'Package verification failed'):
+                updater_manifest.stage_assets(output, root / 'changed-assets', 'v1.2.3',
+                                               'a' * 40, [profile], signed=False, prefix='')
+
     def test_matrix_cli_outputs_all_profiles_without_building(self):
         result = subprocess.run(
             [sys.executable, '-B', str(ROOT / 'scripts/deploy.py'), '--matrix'],
