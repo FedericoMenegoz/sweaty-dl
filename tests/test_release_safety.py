@@ -240,6 +240,7 @@ class AppImageSafetyTests(unittest.TestCase):
         filesystem = bytearray(96)
         filesystem[:4] = b'hsqs'
         struct.pack_into('<HH', filesystem, 28, 4, 0)
+        struct.pack_into('<Q', filesystem, 40, 96)
         path.write_bytes(header + section + runtime + filesystem)
         return path
 
@@ -264,6 +265,17 @@ class AppImageSafetyTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, 'credential pattern'):
                     release_safety.scan_artifact(path)
                 execute.assert_not_called()
+
+    def test_package_padding_retains_credential_and_home_path_checks(self):
+        with tempfile.TemporaryDirectory() as directory:
+            for value in [b'ghp_' + b'X' * 36, b'/home/fixture-owner/private-file']:
+                path = self.make_image(Path(directory))
+                with path.open('ab') as stream:
+                    stream.write(value)
+                with patch.object(release_safety.subprocess, 'run') as execute:
+                    with self.assertRaises(ValueError):
+                        release_safety.scan_artifact(path)
+                    execute.assert_not_called()
 
     def test_extracted_files_keep_hash_bound_exceptions_and_credential_checks(self):
         import hashlib

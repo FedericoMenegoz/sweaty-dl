@@ -63,7 +63,7 @@ def check_link(name, linkname, hardlink=False):
         raise ValueError('Artifact link escapes the application.')
 
 
-def scan_stream(stream, label=None):
+def scan_stream(stream, label=None, *, home_paths=True):
     tail = b''
     digest = hashlib.sha256()
     home_offset = None
@@ -85,7 +85,7 @@ def scan_stream(stream, label=None):
         if PRIVATE_DATA.search(data):
             # Never include the match in errors or CI logs.
             raise _scan_error('credential pattern', label)
-        match = LOCAL_HOME.search(data)
+        match = LOCAL_HOME.search(data) if home_paths else None
         if home_offset is None and match:
             home_offset = scanned_bytes - len(tail) + match.start()
         scanned_bytes += len(block)
@@ -152,13 +152,25 @@ def appimage_offset(path):
         if (superblock[:4] != b'hsqs'
                 or struct.unpack_from('<HH', superblock, 28) != (4, 0)):
             raise ValueError('AppImage is missing its SquashFS v4 filesystem.')
+        used = struct.unpack_from('<Q', superblock, 40)[0]
+        if used < 96 or end + used > path.stat().st_size:
+            raise ValueError('Invalid AppImage filesystem extent.')
         return end
 
 
 def scan_appimage(path):
     offset = appimage_offset(path)
     with path.open('rb') as stream:
+        # Keep the original credential check over every package byte, including
+        # metadata and padding. Home paths are checked on decoded files so the
+        # exact reviewed Node image can retain its existing hash-bound exception.
+        scan_stream(stream, path.name, home_paths=False)
+        stream.seek(0)
         scan_stream(io.BytesIO(stream.read(offset)), path.name)
+        stream.seek(offset + 40)
+        used = struct.unpack('<Q', stream.read(8))[0]
+        stream.seek(offset + used)
+        scan_stream(stream, path.name)
     extractor = shutil.which('unsquashfs')
     if not extractor:
         raise ValueError('AppImage inspection requires the system squashfs-tools package.')
