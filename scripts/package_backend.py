@@ -149,16 +149,19 @@ def package():
                '--name', 'sweatydl-backend', '--distpath', str(BUILD / 'dist'),
                '--workpath', str(BUILD / 'work'), '--specpath', str(BUILD),
                '--paths', str(ROOT / 'backend')]
+    if platform.system() == 'Darwin':
+        # PyInstaller uses strip -S on macOS: remove upstream Python debug
+        # paths before its existing Mach-O processing and ad-hoc signing.
+        # Pinned tools are copied separately after freezing.
+        command.append('--strip')
     for module in ('PySide6', 'PyQt6', 'PyQt5', 'PySide2', 'shiboken6', 'tkinter', 'matplotlib', 'numpy', 'scipy', 'pandas'):
         command.extend(['--exclude-module', module])
     for name in ('yt-dlp', 'yt-dlp-ejs', 'mutagen', 'requests', 'beautifulsoup4'):
         command.extend(['--copy-metadata', name])
     command.extend(['--collect-all', 'yt_dlp_ejs'])
-    for path in tools.values():
-        # Prepared tools are standalone executables linked only to OS libraries.
-        # Preserve their verified bytes/signatures; PyInstaller's binary pass
-        # rewrites Mach-O load commands and re-signs even the official Node image.
-        command.extend(['--add-data' if toolchain else '--add-binary', f'{path}{os.pathsep}tools'])
+    if not toolchain:
+        for path in tools.values():
+            command.extend(['--add-binary', f'{path}{os.pathsep}tools'])
     command.append(str(ROOT / 'backend' / 'entry.py'))
     log = BUILD / 'pyinstaller.log'
     print(f'PyInstaller log: {log}', flush=True)
@@ -166,6 +169,13 @@ def package():
         run(command, env=environment, stdout=output, stderr=subprocess.STDOUT, cwd=ROOT)
     staged = BUILD / 'dist' / 'sweatydl-backend'
     if toolchain:
+        # PyInstaller can reclassify even --add-data executables as binaries.
+        # Prepared tools use only OS libraries; copy their verified bytes after
+        # freezing so stripping/Mach-O processing cannot modify their identity.
+        destination = staged / '_internal/tools'
+        destination.mkdir(parents=True, exist_ok=True)
+        for path in tools.values():
+            shutil.copy2(path, destination / Path(path).name)
         bundled_tools = {name: staged / '_internal/tools' / Path(path).name for name, path in tools.items()}
         if os.name != 'nt':
             for path in bundled_tools.values():
