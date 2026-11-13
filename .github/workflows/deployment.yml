@@ -107,7 +107,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential curl wget file libxdo-dev libssl-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf libfuse2 gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-libav
+          sudo apt-get install -y build-essential curl wget file libxdo-dev libssl-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf squashfs-tools libfuse2 gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-libav
       - name: Prepare checksum-pinned standalone tools
         run: python -B scripts/prepare_release_tools.py
       - run: npm ci
@@ -152,7 +152,7 @@ jobs:
         run: |
           npm ci --ignore-scripts
           sudo apt-get update
-          sudo apt-get install -y minisign
+          sudo apt-get install -y minisign squashfs-tools
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           pattern: SweatyDL-*
@@ -186,7 +186,7 @@ jobs:
       - name: Install signature verifier
         run: |
           sudo apt-get update
-          sudo apt-get install -y minisign
+          sudo apt-get install -y minisign squashfs-tools
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: signed-release

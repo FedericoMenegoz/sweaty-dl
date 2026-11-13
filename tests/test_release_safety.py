@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import subprocess
 import stat
+import struct
 import sys
 import tarfile
 import tempfile
@@ -22,6 +23,18 @@ import updater_manifest
 
 
 class ReleaseSafetyTests(unittest.TestCase):
+    def test_python_source_filename_normalization_preserves_other_strings_and_offsets(self):
+        original = b'/Users/fixture-owner/build/Python/Modules/pyexpat.c'
+        other = b'/Users/fixture-owner/build/Python/Modules/other.c'
+        data = b'unchanged\0' + original + b'\0' + other + b'\0'
+        result = package_backend.normalize_pyexpat_cstrings(data)
+        self.assertEqual(len(result), len(data))
+        self.assertEqual(result.split(b'\0')[0], b'unchanged')
+        self.assertEqual(result.split(b'\0')[2], other)
+        self.assertNotIn(original, result)
+        self.assertTrue(result.split(b'\0')[1].endswith(b'/Modules/pyexpat.c'))
+        self.assertEqual(result.index(b'/Modules/pyexpat.c'), data.index(b'/Modules/pyexpat.c'))
+
     def test_scan_reports_offset_across_read_boundaries_without_path_bytes(self):
         prefix = b'\0' * (1024 * 1024 - 3)
         value = prefix + b'/home/fixture-owner/source\0'
@@ -213,6 +226,100 @@ class ReleaseSafetyTests(unittest.TestCase):
                 proof['tools']['ffprobe']['url'] = 'https://example.invalid/source.tar.xz'
                 with self.assertRaises(RuntimeError):
                     package_backend.verified_toolchain(tools, proof)
+
+
+class AppImageSafetyTests(unittest.TestCase):
+    def make_image(self, root, runtime=b'fixture runtime'):
+        path = root / 'fixture.AppImage'
+        header = bytearray(64)
+        header[:11] = b'\x7fELF\x02\x01\x01\0AI\x02'
+        struct.pack_into('<H', header, 18, 62)
+        struct.pack_into('<Q', header, 40, 64)
+        struct.pack_into('<HH', header, 58, 64, 1)
+        section = struct.pack('<IIQQQQIIQQ', 0, 1, 2, 0, 128, len(runtime), 0, 0, 1, 0)
+        filesystem = bytearray(96)
+        filesystem[:4] = b'hsqs'
+        struct.pack_into('<HH', filesystem, 28, 4, 0)
+        path.write_bytes(header + section + runtime + filesystem)
+        return path
+
+    def test_runtime_and_filesystem_boundaries_are_validated_without_executing_image(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = self.make_image(root, b'hsqs false magic in runtime')
+            self.assertEqual(release_safety.appimage_offset(path), 128 + len(b'hsqs false magic in runtime'))
+            with patch.object(release_safety.shutil, 'which', return_value=None):
+                with self.assertRaisesRegex(ValueError, 'squashfs-tools'):
+                    release_safety.scan_artifact(path)
+            data = bytearray(path.read_bytes())
+            struct.pack_into('<Q', data, 40, 2**63)
+            path.write_bytes(data)
+            with self.assertRaisesRegex(ValueError, 'section table'):
+                release_safety.scan_artifact(path)
+
+    def test_runtime_credentials_are_checked_before_filesystem_extraction(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = self.make_image(Path(directory), b'ghp_' + b'X' * 36)
+            with patch.object(release_safety.subprocess, 'run') as execute:
+                with self.assertRaisesRegex(ValueError, 'credential pattern'):
+                    release_safety.scan_artifact(path)
+                execute.assert_not_called()
+
+    def test_extracted_files_keep_hash_bound_exceptions_and_credential_checks(self):
+        import hashlib
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = self.make_image(root)
+            binary = b'Upstream fixture /home/upstream-builder/source'
+            script = root / 'scripts/release_safety.py'
+            config = root / 'deployment/toolchain.json'
+            config.parent.mkdir()
+            config.write_text(json.dumps({'node': {'platforms': {'Linux': {
+                'binary_sha256': hashlib.sha256(binary).hexdigest()}}}}))
+
+            def extract(command, **kwargs):
+                self.assertEqual(command[0], '/usr/bin/unsquashfs')
+                self.assertEqual(kwargs['env'], {'PATH': '/usr/bin:/bin', 'LC_ALL': 'C'})
+                self.assertNotIn('-f', command)
+                destination = Path(command[command.index('-d') + 1])
+                destination.mkdir()
+                (destination / 'AppRun').write_bytes(b'application fixture')
+                (destination / 'node').write_bytes(payload)
+
+            for payload, accepted in [(binary, True), (binary + b'modified', False),
+                                      (binary + b'ghp_' + b'X' * 36, False)]:
+                with self.subTest(accepted=accepted), \
+                        patch.object(release_safety, '__file__', str(script)), \
+                        patch.object(release_safety.shutil, 'which', return_value='/usr/bin/unsquashfs'), \
+                        patch.object(release_safety.subprocess, 'run', side_effect=extract), \
+                        patch.dict(os.environ, {'TAURI_SIGNING_PRIVATE_KEY': 'fixture-only'}):
+                    if accepted:
+                        release_safety.scan_artifact(path)
+                    else:
+                        with self.assertRaises(ValueError):
+                            release_safety.scan_artifact(path)
+
+    def test_extraction_failures_and_escaping_links_fail_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = self.make_image(Path(directory))
+            with patch.object(release_safety.shutil, 'which', return_value='/usr/bin/unsquashfs'), \
+                    patch.object(release_safety.subprocess, 'run',
+                                 side_effect=subprocess.CalledProcessError(1, ['unsquashfs'],
+                                                                          output='sensitive-fixture')):
+                with self.assertRaises(ValueError) as raised:
+                    release_safety.scan_artifact(path)
+                self.assertNotIn('sensitive-fixture', str(raised.exception))
+            if os.name == 'nt':
+                return
+            def extract(command, **kwargs):
+                destination = Path(command[command.index('-d') + 1])
+                destination.mkdir()
+                (destination / 'AppRun').write_bytes(b'application fixture')
+                (destination / 'escape').symlink_to(destination.parent.parent)
+            with patch.object(release_safety.shutil, 'which', return_value='/usr/bin/unsquashfs'), \
+                    patch.object(release_safety.subprocess, 'run', side_effect=extract):
+                with self.assertRaisesRegex(ValueError, 'symlink escapes'):
+                    release_safety.scan_artifact(path)
 
 
 class SignatureVerificationTests(unittest.TestCase):

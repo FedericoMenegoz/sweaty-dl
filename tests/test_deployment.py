@@ -1,6 +1,7 @@
 import hashlib
 import json
 from pathlib import Path
+import plistlib
 import subprocess
 import sys
 import tempfile
@@ -18,6 +19,30 @@ import updater_manifest
 
 
 class DeploymentTests(unittest.TestCase):
+    def test_disk_image_signature_failure_detaches_the_read_only_mount(self):
+        if sys.platform == 'win32':
+            self.skipTest('macOS disk-image layout requires Unix symlinks')
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            commands = []
+            def execute(command, **kwargs):
+                commands.append(command)
+                if command[:2] == ['hdiutil', 'attach']:
+                    self.assertIn('-readonly', command)
+                    mount = Path(command[command.index('-mountpoint') + 1])
+                    (mount / 'SweatyDL Next.app').mkdir()
+                    (mount / 'Applications').symlink_to('/Applications')
+                    return subprocess.CompletedProcess(command, 0, stdout=plistlib.dumps({
+                        'system-entities': [{'mount-point': str(mount)}]}))
+                if command[0] == 'codesign':
+                    raise subprocess.CalledProcessError(1, command)
+                return subprocess.CompletedProcess(command, 0)
+            with patch.object(deploy, 'run', side_effect=execute):
+                with self.assertRaises(subprocess.CalledProcessError):
+                    deploy.make_disk_image(root / 'stage', root / 'test.dmg')
+            self.assertEqual(commands[-1][:2], ['hdiutil', 'detach'])
+            self.assertFalse(any('makehybrid' in command for command in commands))
+
     def test_windows_build_manifest_stages_with_portable_paths_and_verified_bytes(self):
         import package_backend
         profile = next(item for item in deploy.profiles() if item['os'] == 'windows')

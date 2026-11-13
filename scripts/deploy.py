@@ -6,12 +6,14 @@ import json
 import os
 from pathlib import Path
 import platform
+import plistlib
 import re
 import shutil
 import stat
 import subprocess
 import sys
 import tarfile
+import tempfile
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -85,14 +87,30 @@ def make_disk_image(stage, destination):
     try:
         run(['hdiutil', 'create', '-volname', 'SweatyDL Next', '-srcfolder', stage, '-ov', '-format', 'UDZO', destination])
     except subprocess.CalledProcessError:
-        # Sandboxed macOS may deny temporary disk attachment. HFS+ image creation
-        # and UDIF compression can also run entirely in userspace, without a mount.
-        raw = stage.parent / f'{stage.name}-raw.dmg'
-        if raw.exists():
-            raw.unlink()
-        run(['hdiutil', 'makehybrid', '-hfs', '-hfs-volume-name', 'SweatyDL Next', '-o', raw, stage])
-        run(['hdiutil', 'convert', raw, '-format', 'UDZO', '-o', destination, '-ov'])
+        # The hybrid HFS fallback adds Finder metadata that invalidates strict
+        # app signatures. A real DMG requires native DiskImages access.
+        raise RuntimeError('Native DMG creation failed; run packaging with macOS DiskImages access.') from None
     run(['hdiutil', 'verify', destination])
+    with tempfile.TemporaryDirectory(prefix='dmg-inspection-', dir=destination.parent) as temporary:
+        mount = Path(temporary).resolve()
+        attached = False
+        try:
+            result = run(['hdiutil', 'attach', '-readonly', '-nobrowse', '-noautoopen',
+                          '-mountpoint', mount, '-plist', destination], stdout=subprocess.PIPE)
+            attached = True
+            entities = plistlib.loads(result.stdout).get('system-entities', [])
+            if not any(item.get('mount-point') == str(mount) for item in entities):
+                raise RuntimeError('Disk image did not mount at its inspection directory.')
+            app = mount / 'SweatyDL Next.app'
+            applications = mount / 'Applications'
+            if not app.is_dir() or not applications.is_symlink() or applications.readlink() != Path('/Applications'):
+                raise RuntimeError('Disk image has an unexpected application layout.')
+            from release_safety import scan_tree
+            scan_tree(app)
+            run(['codesign', '--verify', '--deep', '--strict', app])
+        finally:
+            if attached:
+                run(['hdiutil', 'detach', mount])
 
 
 def make_app_zip(app, destination):

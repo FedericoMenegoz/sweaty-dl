@@ -2,6 +2,7 @@
 import argparse
 import hashlib
 import importlib.metadata as metadata
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -104,6 +105,45 @@ def strip_metadata_descriptions(staged):
             path.write_bytes(headers + separator)
 
 
+def normalize_pyexpat_cstrings(data):
+    # CPython's __FILE__ constants describe C error locations, not runtime
+    # lookup paths. Keep string sizes and suffix offsets unchanged.
+    suffix = b'/Modules/pyexpat.c'
+    strings = data.split(b'\0')
+    for index, value in enumerate(strings):
+        if value.startswith((b'/Users/', b'/home/')) and value.endswith(suffix):
+            prefix_size = len(value) - len(suffix)
+            if prefix_size >= len(b'/source'):
+                strings[index] = b'/source' + b'_' * (prefix_size - len(b'/source')) + suffix
+    return b'\0'.join(strings)
+
+
+def prepare_pyexpat(destination):
+    from macholib.MachO import MachO
+    source = Path(importlib.util.find_spec('pyexpat').origin)
+    data = source.read_bytes()
+    prepared = bytearray(data)
+    # Restrict changes to source-filename constants in the read-only string
+    # section; executable code, other strings and the installed Python stay intact.
+    for header in MachO(str(source)).headers:
+        for _, _, sections in header.commands:
+            if not isinstance(sections, list):
+                continue
+            for section in sections:
+                if (section.segname.rstrip(b'\0') == b'__TEXT'
+                        and section.sectname.rstrip(b'\0') == b'__cstring'):
+                    start = header.offset + section.offset
+                    end = start + section.size
+                    prepared[start:end] = normalize_pyexpat_cstrings(data[start:end])
+    if prepared == data:
+        return None
+    destination.mkdir(parents=True, exist_ok=True)
+    (destination / source.name).write_bytes(prepared)
+    # This is an Analysis input. PyInstaller applies its ordinary Mach-O
+    # processing and ad-hoc signature after collecting this extension.
+    return destination
+
+
 def verified_toolchain(tools, proof=None):
     """Release tools must match the hash-verified preparation step's proof."""
     proof_path = os.environ.get('SWEATYDL_TOOLCHAIN')
@@ -154,6 +194,9 @@ def package():
         # paths before its existing Mach-O processing and ad-hoc signing.
         # Pinned tools are copied separately after freezing.
         command.append('--strip')
+        normalized = prepare_pyexpat(BUILD / 'python-input')
+        if normalized:
+            command.extend(['--paths', str(normalized)])
     for module in ('PySide6', 'PyQt6', 'PyQt5', 'PySide2', 'shiboken6', 'tkinter', 'matplotlib', 'numpy', 'scipy', 'pandas'):
         command.extend(['--exclude-module', module])
     for name in ('yt-dlp', 'yt-dlp-ejs', 'mutagen', 'requests', 'beautifulsoup4'):

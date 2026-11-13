@@ -1,11 +1,16 @@
 """Local checks for files that are about to enter public release artifacts."""
 import hashlib
+import io
 import json
 from pathlib import Path, PurePosixPath
 import posixpath
 import re
+import shutil
 import stat
+import struct
+import subprocess
 import tarfile
+import tempfile
 import zipfile
 
 PRIVATE_DATA = re.compile(
@@ -89,7 +94,11 @@ def scan_stream(stream, label=None):
 
 def scan_artifact(path):
     check_name(path.name)
-    if path.name.endswith('.app.tar.gz'):
+    with path.open('rb') as stream:
+        is_appimage = path.suffix == '.AppImage' and stream.read(4) == b'\x7fELF'
+    if is_appimage:
+        scan_appimage(path)
+    elif path.name.endswith('.app.tar.gz'):
         with tarfile.open(path) as archive:
             for member in archive:
                 check_name(member.name)
@@ -116,6 +125,61 @@ def scan_artifact(path):
             scan_stream(stream, path.name)
 
 
+def appimage_offset(path):
+    # Type-2 x64 AppImages append SquashFS after the ELF runtime. Derive its
+    # boundary from ELF sections, rather than matching magic inside machine code.
+    with path.open('rb') as stream:
+        header = stream.read(64)
+        if (len(header) != 64 or header[:7] != b'\x7fELF\x02\x01\x01'
+                or header[8:11] != b'AI\x02'
+                or struct.unpack_from('<H', header, 18)[0] != 62):
+            raise ValueError('Unsupported AppImage runtime header.')
+        table = struct.unpack_from('<Q', header, 40)[0]
+        size, count = struct.unpack_from('<HH', header, 58)
+        end = table + size * count
+        limit = min(path.stat().st_size - 96, 16 * 1024 * 1024)
+        if size != 64 or not count or table < 64 or end > limit:
+            raise ValueError('Invalid AppImage section table.')
+        stream.seek(table)
+        for _ in range(count):
+            section = struct.unpack('<IIQQQQIIQQ', stream.read(size))
+            if section[1] != 8:  # SHT_NOBITS has no bytes in the file.
+                end = max(end, section[4] + section[5])
+            if end > limit:
+                raise ValueError('Invalid AppImage section extent.')
+        stream.seek(end)
+        superblock = stream.read(96)
+        if (superblock[:4] != b'hsqs'
+                or struct.unpack_from('<HH', superblock, 28) != (4, 0)):
+            raise ValueError('AppImage is missing its SquashFS v4 filesystem.')
+        return end
+
+
+def scan_appimage(path):
+    offset = appimage_offset(path)
+    with path.open('rb') as stream:
+        scan_stream(io.BytesIO(stream.read(offset)), path.name)
+    extractor = shutil.which('unsquashfs')
+    if not extractor:
+        raise ValueError('AppImage inspection requires the system squashfs-tools package.')
+    # Never execute an AppImage for inspection. Use the distribution's extractor
+    # in a fresh private directory, without signing keys or inherited credentials.
+    with tempfile.TemporaryDirectory(prefix='sweatydl-appimage-') as temporary:
+        destination = Path(temporary) / 'filesystem'
+        try:
+            subprocess.run([extractor, '-no-progress', '-no-xattrs', '-o', str(offset),
+                            '-d', str(destination), str(path.resolve())],
+                           env={'PATH': '/usr/bin:/bin', 'LC_ALL': 'C'},
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                           timeout=180, check=True)
+        except (OSError, subprocess.SubprocessError):
+            raise ValueError('AppImage filesystem extraction failed.') from None
+        if (destination.is_symlink() or not destination.is_dir()
+                or not (destination / 'AppRun').exists()):
+            raise ValueError('AppImage is missing its application layout.')
+        scan_tree(destination)
+
+
 def scan_tree(directory):
     for path in Path(directory).rglob('*'):
         check_name(path.relative_to(directory).as_posix())
@@ -125,3 +189,5 @@ def scan_tree(directory):
         elif path.is_file():
             with path.open('rb') as stream:
                 scan_stream(stream, path.relative_to(directory).as_posix())
+        elif not path.is_dir():
+            raise ValueError('Packaged resource contains a special file.')

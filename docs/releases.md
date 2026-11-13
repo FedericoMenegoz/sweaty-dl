@@ -98,7 +98,8 @@ with a stale version fails safely rather than overwriting another commit's tag.
 In a clean checkout of the triggering commit, download that run's `signed-release`
 workflow artifact into `deployments/`, keeping its profile directories
 (`deployments/SweatyDL-linux-1/`, `deployments/SweatyDL-mac-1/`, and
-`deployments/SweatyDL-windows-1/`). Install Minisign on the verification machine;
+`deployments/SweatyDL-windows-1/`). Install Minisign and `squashfs-tools`
+(`unsquashfs`) on the verification machine;
 the public key is already in the app configuration, and verification needs no
 private key. Then set the version selected by that run:
 
@@ -270,6 +271,25 @@ accepts only their exact reviewed binary hashes, while still checking credential
 patterns. Changing any byte removes that exception. Optional wheel metadata long
 descriptions are omitted to avoid shipping documentation path examples; metadata
 headers and license notices are retained.
+
+On macOS, Python extension debug symbols are removed with PyInstaller's `strip -S`
+processing. If pyexpat embeds its upstream builder's home directory in C error
+source filenames, only those `Modules/pyexpat.c` constants in the Mach-O read-only
+string section receive a neutral prefix before freezing. Their lengths and suffix
+offsets stay unchanged; executable instructions and the installed Python remain
+untouched. PyInstaller then applies its existing ad-hoc signature processing.
+Prepared Node/FFprobe files are copied after freezing and checked again against
+their original toolchain proof.
+Disk images require native macOS DiskImages access. Packaging mounts each image
+read-only, scans its app and verifies its strict signature before detaching it.
+The hybrid HFS fallback is not used because it can add forbidden Finder metadata.
+
+AppImage inspection scans the ELF runtime and uses the system `unsquashfs` to
+inspect the compressed filesystem, applying the same per-file credential, path,
+link and exact Node-hash checks used for the backend. Inspection never executes
+an AppImage. The extractor receives no inherited credentials or signing keys;
+missing tools or extraction failures stop staging. CI installs `squashfs-tools`
+from the same signed Ubuntu package repositories used for its other native tools.
 
 The backend notices include the exact FFmpeg source archive, license and build
 recipe, along with Node's license. Review redistribution obligations for all bundled
