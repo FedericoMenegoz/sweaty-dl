@@ -15,6 +15,14 @@ import updater_manifest
 
 
 class UpdaterPackagingTests(unittest.TestCase):
+    def test_expected_assets_use_sweatydl_brand_on_every_platform(self):
+        for profile in deploy.profiles():
+            with self.subTest(profile=profile['name']):
+                assets = updater_manifest.expected_assets(profile, '0.1.2')
+                self.assertTrue(all(name.startswith(f'SweatyDL_0.1.2_{profile["name"]}_x64')
+                                    for name in assets))
+                self.assertFalse(any('Next' in name for name in assets))
+
     def test_unsigned_build_staging_reports_canonical_asset_on_safety_rejection(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -22,10 +30,10 @@ class UpdaterPackagingTests(unittest.TestCase):
                        'formats': ['deb', 'AppImage']}
             source = root / 'source/linux-1'
             source.mkdir(parents=True)
-            filename = 'SweatyDL-Next_1.2.3_linux-1_x64.deb'
+            filename = 'SweatyDL_1.2.3_linux-1_x64.deb'
             payload = b'package /home/fixture-owner/private-file'
             (source / filename).write_bytes(payload)
-            other_name = 'SweatyDL-Next_1.2.3_linux-1_x64.AppImage'
+            other_name = 'SweatyDL_1.2.3_linux-1_x64.AppImage'
             other_payload = b'ordinary package fixture'
             (source / other_name).write_bytes(other_payload)
             (source / 'build-result.json').write_text(json.dumps({

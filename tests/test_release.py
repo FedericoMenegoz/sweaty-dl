@@ -149,7 +149,7 @@ path.write_text(json.dumps(state))
         self.manifest = {'profile': 'linux-1', 'source_commit': self.sha, 'version': '1.0.0',
                          'status': 'built-needs-installation-test', 'artifacts': []}
         for extension in ('deb', 'deb.sig', 'AppImage', 'AppImage.sig'):
-            filename = f'SweatyDL-Next_1.0.0_linux-1_x64.{extension}'
+            filename = f'SweatyDL_1.0.0_linux-1_x64.{extension}'
             data = base64.b64encode(b'untrusted comment: fixture\nfixture\ntrusted comment: version:1.0.0\nfixture\n') if extension.endswith('.sig') else b'installer'
             (self.directory / filename).write_bytes(data)
             self.manifest['artifacts'].append({
@@ -237,7 +237,7 @@ path.write_text(json.dumps(state))
             artifacts = []
             for extension in extensions:
                 suffix = '-setup.' + extension if name == 'windows-1' else '.' + extension
-                filename = f'SweatyDL-Next_1.0.0_{name}_x64{suffix}'
+                filename = f'SweatyDL_1.0.0_{name}_x64{suffix}'
                 data = base64.b64encode(b'untrusted comment: fixture\nfixture\ntrusted comment: version:1.0.0\nfixture\n') if extension.endswith('.sig') else b'installer'
                 if extension == 'app.zip':
                     stream = io.BytesIO()

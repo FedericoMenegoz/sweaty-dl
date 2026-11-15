@@ -26,8 +26,12 @@ SUPPORTED = {('macos', 'x86_64'): ('x86_64-apple-darwin', ['dmg', 'app.zip']),
              ('linux', 'x86_64'): ('x86_64-unknown-linux-gnu', ['deb', 'AppImage'])}
 
 LINUX_BUNDLE_EXTENSIONS = {'deb': 'deb', 'AppImage': 'AppImage'}
-MACOS_PRODUCT_NAME = 'SweatyDL'
-MACOS_APP_NAME = MACOS_PRODUCT_NAME + '.app'
+PRODUCT_NAME = 'SweatyDL'
+MACOS_APP_NAME = PRODUCT_NAME + '.app'
+
+
+def artifact_prefix(profile, version):
+    return f'{PRODUCT_NAME}_{version}_{profile["name"]}_x64'
 
 
 def profiles(root=PROFILES):
@@ -87,7 +91,7 @@ def build_kit(destination):
 
 def make_disk_image(stage, destination):
     try:
-        run(['hdiutil', 'create', '-volname', MACOS_PRODUCT_NAME, '-srcfolder', stage, '-ov', '-format', 'UDZO', destination])
+        run(['hdiutil', 'create', '-volname', PRODUCT_NAME, '-srcfolder', stage, '-ov', '-format', 'UDZO', destination])
     except subprocess.CalledProcessError:
         # The hybrid HFS fallback adds Finder metadata that invalidates strict
         # app signatures. A real DMG requires native DiskImages access.
@@ -133,7 +137,7 @@ def make_app_zip(app, destination):
 def prepare_update(profile, artifacts, version):
     if profile['os'] == 'macos':
         app = OUTPUT / profile['name'] / MACOS_APP_NAME
-        update = app.parent / f'SweatyDL-Next_{version}_{profile["name"]}_x64.app.tar.gz'
+        update = app.parent / (artifact_prefix(profile, version) + '.app.tar.gz')
         # Archive the final app AFTER backend symlinks are restored and codesign
         # succeeds, so the updater installs exactly the validated application.
         def neutral_metadata(entry):
@@ -211,14 +215,21 @@ def build(profile, skip_backend=False, updater=False):
     version = json.loads((ROOT / 'package.json').read_text())['version']
     directory = OUTPUT / profile['name']
     directory.mkdir(parents=True, exist_ok=True)
-    configuration = {'bundle': {'active': True, 'resources': {'resources/backend/': 'backend/'}}}
+    configuration = {'productName': PRODUCT_NAME,
+                     'bundle': {'active': True, 'resources': {'resources/backend/': 'backend/'}}}
     if profile['os'] == 'macos':
-        configuration['productName'] = MACOS_PRODUCT_NAME
         configuration['bundle']['macOS'] = {'minimumSystemVersion': profile['minimum_os']}
     elif profile['os'] == 'windows':
-        configuration['bundle']['windows'] = {'minimumWebview2Version': '110.0.1587.0', 'webviewInstallMode': {'type': 'downloadBootstrapper', 'silent': True}}
+        configuration['bundle']['windows'] = {
+            'minimumWebview2Version': '110.0.1587.0',
+            'webviewInstallMode': {'type': 'downloadBootstrapper', 'silent': True},
+            'nsis': {'installerHooks': str(ROOT / 'scripts/windows-installer-hooks.nsh')},
+        }
     else:
-        configuration['bundle']['linux'] = {'appimage': {'bundleMediaFramework': True}}
+        configuration['bundle']['linux'] = {
+            'appimage': {'bundleMediaFramework': True},
+            'deb': {name: ['sweaty-dl-next'] for name in ('provides', 'conflicts', 'replaces')},
+        }
     config_path = ROOT / '.build' / f"tauri-{profile['name']}.json"
     config_path.parent.mkdir(parents=True, exist_ok=True)
     config_path.write_text(json.dumps(configuration, indent=2))
@@ -267,7 +278,7 @@ def build(profile, skip_backend=False, updater=False):
         # enclosing app preserves the exact reviewed standalone tool images.
         run(['codesign', '--force', '--sign', '-', app])
         run(['codesign', '--verify', '--deep', '--strict', app])
-        archive = directory / f'SweatyDL-Next_{version}_{profile["name"]}_x64.app.zip'
+        archive = directory / (artifact_prefix(profile, version) + '.app.zip')
         make_app_zip(app, archive)
         artifacts.append(archive)
         (directory / 'verified-artifacts.json').write_text(json.dumps([{'file': archive.relative_to(ROOT).as_posix(), 'bytes': archive.stat().st_size, 'sha256': sha256(archive)}], indent=2))
@@ -278,12 +289,12 @@ def build(profile, skip_backend=False, updater=False):
             stage.mkdir(parents=True)
             (stage / 'Applications').symlink_to('/Applications')
             shutil.copytree(app, stage / app.name, symlinks=True)
-            dmg = directory / f'SweatyDL-Next_{version}_{profile["name"]}_x64.dmg'
+            dmg = directory / (artifact_prefix(profile, version) + '.dmg')
             make_disk_image(stage, dmg)
             artifacts.append(dmg)
     elif profile['os'] == 'windows':
         for source in (bundle / 'nsis').glob('*.exe'):
-            destination = directory / f'SweatyDL-Next_{version}_{profile["name"]}_x64-setup.exe'
+            destination = directory / (artifact_prefix(profile, version) + '-setup.exe')
             shutil.copy2(source, destination)
             artifacts.append(destination)
         if not artifacts:
@@ -296,7 +307,7 @@ def build(profile, skip_backend=False, updater=False):
                 raise RuntimeError(f'Tauri did not produce the requested {format_name} package in {bundle / format_name.lower()}.')
             if len(sources) != 1:
                 raise RuntimeError(f'Expected one {format_name} package, found {len(sources)}: {sources}')
-            destination = directory / f'SweatyDL-Next_{version}_{profile["name"]}_x64.{extension}'
+            destination = directory / (artifact_prefix(profile, version) + '.' + extension)
             shutil.copy2(sources[0], destination)
             artifacts.append(destination)
     if updater:

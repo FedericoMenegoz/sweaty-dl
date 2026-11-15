@@ -6,7 +6,7 @@ import re
 import shutil
 from urllib.parse import quote
 
-from deploy import profiles, sha256
+from deploy import artifact_prefix, profiles, sha256
 from release_version import VERSION_TAG
 from release_safety import scan_artifact
 
@@ -20,7 +20,7 @@ def update_formats(profile):
 
 
 def expected_assets(profile, version, signed=True):
-    prefix = f'SweatyDL-Next_{version}_{profile["name"]}_x64'
+    prefix = artifact_prefix(profile, version)
     extensions = set(update_formats(profile))
     if profile['os'] == 'macos':
         extensions.add('.app.zip')

@@ -161,7 +161,11 @@ class DeploymentTests(unittest.TestCase):
                     patch('deploy.platform.system', return_value='Windows'), \
                     patch('deploy.shutil.which', return_value='npm.cmd'), patch.object(deploy, 'run'):
                 artifacts = deploy.build(profile, skip_backend=True, updater=True)
-            filename = 'SweatyDL-Next_1.2.3_windows-1_x64-setup.exe'
+            filename = 'SweatyDL_1.2.3_windows-1_x64-setup.exe'
+            configuration = json.loads((root / '.build/tauri-windows-1.json').read_text())
+            self.assertEqual(configuration['productName'], 'SweatyDL')
+            self.assertEqual(Path(configuration['bundle']['windows']['nsis']['installerHooks']),
+                             root / 'scripts/windows-installer-hooks.nsh')
             self.assertEqual(artifacts[0]['file'], f'deployments/windows-1/{filename}')
             (output / 'windows-1/build-result.json').write_text(json.dumps({
                 'profile': 'windows-1', 'version': '1.2.3', 'source_commit': 'a' * 40,
@@ -173,6 +177,36 @@ class DeploymentTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'Package verification failed'):
                 updater_manifest.stage_assets(output, root / 'changed-assets', 'v1.2.3',
                                                'a' * 40, [profile], signed=False, prefix='')
+
+    def test_linux_branding_and_debian_replacement_keep_legacy_upgrade_metadata(self):
+        import package_backend
+        profile = next(item for item in deploy.profiles() if item['os'] == 'linux')
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'package.json').write_text('{"version":"0.1.2"}')
+            resources = root / 'backend'
+            resources.mkdir()
+            (resources / 'build-info.json').write_text(json.dumps({
+                'ok': True, 'frozen': True, 'os': 'Linux', 'arch': 'x86_64'}))
+            bundle = root / 'src-tauri/target' / profile['target'] / 'release/bundle'
+            for extension in ('deb', 'AppImage'):
+                source = bundle / extension.lower() / ('package.' + extension)
+                source.parent.mkdir(parents=True)
+                source.write_bytes(b'package fixture')
+            with patch.object(deploy, 'ROOT', root), patch.object(deploy, 'OUTPUT', root / 'deployments'), \
+                    patch.object(package_backend, 'RESOURCES', resources), \
+                    patch('deploy.platform.system', return_value='Linux'), \
+                    patch('deploy.shutil.which', return_value='npm'), patch.object(deploy, 'run'), \
+                    patch.dict(os.environ, {'SWEATYDL_RELEASE_BUILD': '0'}):
+                artifacts = deploy.build(profile, skip_backend=True, updater=True)
+            configuration = json.loads((root / '.build/tauri-linux-1.json').read_text())
+            self.assertEqual(configuration['productName'], 'SweatyDL')
+            self.assertEqual(configuration['bundle']['linux']['deb'], {
+                'provides': ['sweaty-dl-next'], 'conflicts': ['sweaty-dl-next'],
+                'replaces': ['sweaty-dl-next'],
+            })
+            self.assertEqual({Path(item['file']).name for item in artifacts},
+                             {'SweatyDL_0.1.2_linux-1_x64.deb', 'SweatyDL_0.1.2_linux-1_x64.AppImage'})
 
     def test_matrix_cli_outputs_all_profiles_without_building(self):
         result = subprocess.run(

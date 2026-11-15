@@ -208,6 +208,13 @@ Users of earlier builds without an updater must install an updater-enabled
 release once. Subsequent updates can be installed from the app. Installing from
 a macOS disk image requires first copying the app to a writable location such
 as Applications; OS-level code signing and notarization remain as configured.
+Version `0.1.2` uses the product name `SweatyDL` on Windows, Linux and macOS;
+download filenames start with `SweatyDL_`. The app identifier, executable names,
+signing identity and saved queue keys remain stable.
+The Windows updater reuses a legacy installation directory and migrates its
+installer records and matching shortcuts after installation. The Debian package
+declares that it replaces/conflicts with/provides the former `sweaty-dl-next`
+package, so the package manager replaces it during the rename.
 The macOS installer contains `SweatyDL.app`. An in-app update replaces the bundle
 at its existing installation path, so a legacy `SweatyDL Next.app` installation
 keeps that filesystem name while its app metadata and version are updated.

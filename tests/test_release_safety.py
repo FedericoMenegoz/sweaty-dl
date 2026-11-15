@@ -168,7 +168,7 @@ class ReleaseSafetyTests(unittest.TestCase):
 
     def test_archive_scan_diagnostic_names_relative_member_without_match_value(self):
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / 'SweatyDL-Next_1.0.0_mac-1_x64.app.tar.gz'
+            path = Path(directory) / 'SweatyDL_1.0.0_mac-1_x64.app.tar.gz'
             with tarfile.open(path, 'w:gz') as archive:
                 member = tarfile.TarInfo('SweatyDL Next.app/Contents/Resources/backend/data.bin')
                 value = b'/home/fixture-owner/private-file'
@@ -460,7 +460,7 @@ class SignatureVerificationTests(unittest.TestCase):
             source.mkdir(parents=True)
             artifacts = []
             for extension in ('.deb', '.AppImage'):
-                name = 'SweatyDL-Next_1.0.0_linux-1_x64' + extension
+                name = 'SweatyDL_1.0.0_linux-1_x64' + extension
                 (source / name).write_bytes(b'package fixture')
                 artifacts.append({'file': 'deployments/linux-1/' + name, 'bytes': len(b'package fixture'),
                                   'sha256': hashlib.sha256(b'package fixture').hexdigest()})
