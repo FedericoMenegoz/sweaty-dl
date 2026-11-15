@@ -157,6 +157,23 @@ def prepare_python_extensions(destination, extension_root=None):
     return destination if changed else None
 
 
+def select_normalized_inputs(spec, normalized):
+    # Analysis caches some standard modules before applying --paths. Replace
+    # only their resolved stdlib binary inputs after Analysis has discovered
+    # dependencies, before COLLECT strips and signs the selected files.
+    original = Path(importlib.util.find_spec('array').origin).parent
+    replacements = {str((original / path.name).resolve()): str(path.resolve())
+                    for path in normalized.glob('*.so')}
+    text = spec.read_text()
+    marker = '\npyz = PYZ('
+    if text.count(marker) != 1:
+        raise RuntimeError('Unexpected PyInstaller spec layout; normalized inputs were not selected.')
+    selection = (f'\nimport os as _sweatydl_os\n_sweatydl_inputs = {replacements!r}\n'
+                 'a.binaries = [(name, _sweatydl_inputs.get(_sweatydl_os.path.realpath(source), source), kind)\n'
+                 '              for name, source, kind in a.binaries]\n')
+    spec.write_text(text.replace(marker, selection + marker, 1))
+
+
 def verified_toolchain(tools, proof=None):
     """Release tools must match the hash-verified preparation step's proof."""
     proof_path = os.environ.get('SWEATYDL_TOOLCHAIN')
@@ -202,14 +219,13 @@ def package():
                '--name', 'sweatydl-backend', '--distpath', str(BUILD / 'dist'),
                '--workpath', str(BUILD / 'work'), '--specpath', str(BUILD),
                '--paths', str(ROOT / 'backend')]
+    normalized = None
     if platform.system() == 'Darwin':
         # PyInstaller uses strip -S on macOS: remove upstream Python debug
         # paths before its existing Mach-O processing and ad-hoc signing.
         # Pinned tools are copied separately after freezing.
         command.append('--strip')
         normalized = prepare_python_extensions(BUILD / 'python-input')
-        if normalized:
-            command.extend(['--paths', str(normalized)])
     for module in ('PySide6', 'PyQt6', 'PyQt5', 'PySide2', 'shiboken6', 'tkinter', 'matplotlib', 'numpy', 'scipy', 'pandas'):
         command.extend(['--exclude-module', module])
     for name in ('yt-dlp', 'yt-dlp-ejs', 'mutagen', 'requests', 'beautifulsoup4'):
@@ -222,6 +238,25 @@ def package():
     log = BUILD / 'pyinstaller.log'
     print(f'PyInstaller log: {log}', flush=True)
     with log.open('w') as output:
+        if normalized:
+            # Generate the ordinary pinned PyInstaller spec, then select the
+            # normalized binary inputs explicitly. Dependency discovery still
+            # uses the installed extensions and their original library paths.
+            options = []
+            arguments = iter(command[4:])
+            for argument in arguments:
+                if argument in ('--noconfirm', '--clean'):
+                    continue
+                if argument in ('--distpath', '--workpath'):
+                    next(arguments)
+                    continue
+                options.append(argument)
+            run([sys.executable, '-B', '-m', 'PyInstaller.utils.cliutils.makespec', *options],
+                env=environment, stdout=output, stderr=subprocess.STDOUT, cwd=ROOT)
+            spec = BUILD / 'sweatydl-backend.spec'
+            select_normalized_inputs(spec, normalized)
+            command = [sys.executable, '-B', '-m', 'PyInstaller', '--noconfirm', '--clean',
+                       '--distpath', str(BUILD / 'dist'), '--workpath', str(BUILD / 'work'), str(spec)]
         run(command, env=environment, stdout=output, stderr=subprocess.STDOUT, cwd=ROOT)
     staged = BUILD / 'dist' / 'sweatydl-backend'
     if toolchain:
@@ -245,7 +280,10 @@ def package():
     if toolchain:
         prepared = Path(os.environ['SWEATYDL_TOOLCHAIN']).parent / 'notices'
         shutil.copytree(prepared, notices / 'release-tools', dirs_exist_ok=True)
-    (notices / 'README.txt').write_text('SweatyDL bundles Python, yt-dlp, requests, BeautifulSoup, mutagen, Node.js and FFprobe plus their dependencies.\nPython: https://www.python.org/\nyt-dlp: https://github.com/yt-dlp/yt-dlp\nNode.js: https://nodejs.org/\nFFmpeg/FFprobe source and licensing: https://ffmpeg.org/legal.html\nMutagen source: https://github.com/quodlibet/mutagen\nThis private test build is unsigned/unnotarized. Review all dependency licenses before public distribution.\n')
+    notice = 'SweatyDL bundles Python, yt-dlp, requests, BeautifulSoup, mutagen, Node.js and FFprobe plus their dependencies.\nPython: https://www.python.org/\nyt-dlp: https://github.com/yt-dlp/yt-dlp\nNode.js: https://nodejs.org/\nFFmpeg/FFprobe source and licensing: https://ffmpeg.org/legal.html\nMutagen source: https://github.com/quodlibet/mutagen\nReview all dependency licenses and included source/build materials before redistribution.\n'
+    if platform.system() == 'Darwin':
+        notice += 'macOS packaging omits Python extension debug symbols and normalizes reviewed C diagnostic source-filename prefixes without changing executable instructions.\n'
+    (notices / 'README.txt').write_text(notice)
     executable = staged / ('sweatydl-backend.exe' if os.name == 'nt' else 'sweatydl-backend')
     # Run with no development Python, Node or FFprobe on PATH and no project cwd.
     clean_env = {k: v for k, v in os.environ.items() if not k.startswith(('PYTHON', 'SWEATYDL_', 'DYLD_', 'TAURI_SIGNING_'))}

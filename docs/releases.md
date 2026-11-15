@@ -279,6 +279,8 @@ before freezing. Only the exact CPython source filenames listed in the packaging
 script are normalized. String lengths and suffix offsets stay unchanged;
 executable instructions and the installed Python remain untouched. PyInstaller
 then applies its existing ad-hoc signature processing.
+The generated spec selects normalized stdlib inputs after Analysis, including
+cached modules; dependency discovery still uses the installed originals.
 Prepared Node/FFprobe files are copied after freezing and checked again against
 their original toolchain proof.
 Disk images require native macOS DiskImages access. Packaging mounts each image
@@ -295,8 +297,14 @@ GTK 3.24.33 contains two SVG editor export-filename records already published in
 its Adwaita/HighContrast theme sources. Only the digests of those complete quoted
 attributes are recognized as public metadata; their path text is neither stored
 in scanner configuration nor printed. This does not exempt GTK libraries as a
-whole. Changed records and other home paths still fail, and credential checks
-always inspect the original bytes.
+whole. Changed records and other home paths still fail; SVG metadata handling
+does not exempt any credentials.
+GnuTLS includes public known-answer PEM vectors in its cryptographic self-tests.
+Only five complete blocks verified against its published 3.7.3 self-test source
+are recognized by digest. No key bytes are stored in scanner configuration or
+printed. Partial or changed blocks, unknown keys and tokens remain rejected;
+the library and its self-tests are not modified. Stream boundaries preserve
+the complete-record checks for these reviewed public records.
 
 The backend notices include the exact FFmpeg source archive, license and build
 recipe, along with Node's license. Review redistribution obligations for all bundled

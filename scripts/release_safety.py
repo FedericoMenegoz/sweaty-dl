@@ -25,6 +25,26 @@ PUBLIC_SVG_EXPORT_RECORDS = frozenset({
     '97ae80094e1903329ae2d3cd7dfe329e478dbe64d851e7b63326c11b762d8a2c',
 })
 SVG_EXPORT_RECORD = re.compile(rb'inkscape:export-filename="[^"\0\r\n]{1,512}"')
+# Complete public known-answer vectors compiled into GnuTLS 3.7.3 self-tests.
+# Never exempt a library or print/store the PEM bytes in scanner configuration.
+# https://github.com/gnutls/gnutls/blob/3.7.3/lib/crypto-selftests-pk.c
+PUBLIC_SELF_TEST_PEMS = frozenset({
+    'a4d138d7ef9748464117b44fb9c0a4b5b85a1599a127d02690abaa96d03c16e6',
+    'fa0b06a72461ec0a963dcfccb8d5b61bd88a6074fc7271573bff68ab86b8c1af',
+    'ef237ea8db4f2ae9ee100e8ced96d29b5dceb0e6a948443e6b8a00b1791f9ec9',
+    '91ea1699ff6b1a34b4a1d500a9c75a808441e47b9ea68da6fb0195e01ce1dc61',
+    'd039c8119a029ab9f9c83c04d67002d887b6bc6026c4264402ab27cdf24cf138',
+})
+SELF_TEST_PEM_RECORD = re.compile(
+    rb'-----BEGIN ((?:RSA |EC )?PRIVATE KEY)-----\r?\n'
+    rb'[A-Za-z0-9+/=\r\n]{1,3500}-----END \1-----')
+
+
+def _mask_public_self_tests(data):
+    def mask_public_record(match):
+        value = match.group()
+        return b'\0' * len(value) if hashlib.sha256(value).hexdigest() in PUBLIC_SELF_TEST_PEMS else value
+    return SELF_TEST_PEM_RECORD.sub(mask_public_record, data)
 
 
 def _mask_public_svg_records(data):
@@ -34,11 +54,11 @@ def _mask_public_svg_records(data):
     return SVG_EXPORT_RECORD.sub(mask_public_record, data)
 
 
-def _home_match(data, final=False):
-    # Defer the tail until the next read (or EOF), so a split attribute cannot
+def _buffered_match(pattern, data, final=False):
+    # Defer the tail until the next read (or EOF), so a split public record cannot
     # cause a partial match before its complete record can be checked.
     limit = len(data) if final else max(0, len(data) - 4096)
-    return next((match for match in LOCAL_HOME.finditer(data) if match.start() < limit), None)
+    return next((match for match in pattern.finditer(data) if match.start() < limit), None)
 
 
 def _safe_label(value):
@@ -94,7 +114,9 @@ def scan_stream(stream, label=None, *, home_paths=True):
     while True:
         block = stream.read(1024 * 1024)
         if not block:
-            match = _home_match(home_tail, final=True) if home_paths else None
+            if _buffered_match(PRIVATE_DATA, tail, final=True):
+                raise _scan_error('credential pattern', label)
+            match = _buffered_match(LOCAL_HOME, home_tail, final=True) if home_paths else None
             if home_offset is None and match:
                 home_offset = scanned_bytes - len(home_tail) + match.start()
             if home_offset is not None:
@@ -107,16 +129,16 @@ def scan_stream(stream, label=None, *, home_paths=True):
                     raise _scan_error('local home-path pattern', label, home_offset)
             return
         digest.update(block)
-        data = tail + block
-        if PRIVATE_DATA.search(data):
+        data = _mask_public_self_tests(tail + block)
+        if _buffered_match(PRIVATE_DATA, data):
             # Never include the match in errors or CI logs.
             raise _scan_error('credential pattern', label)
         if home_paths:
             home_data = _mask_public_svg_records(home_tail + block)
-            match = _home_match(home_data)
+            match = _buffered_match(LOCAL_HOME, home_data)
             if home_offset is None and match:
                 home_offset = scanned_bytes - len(home_tail) + match.start()
-            # Retain masked context as well as the raw credential-scanning tail.
+            # Each tail masks only its own exact reviewed public records.
             home_tail = home_data[-4096:]
         scanned_bytes += len(block)
         tail = data[-4096:]
