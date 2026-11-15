@@ -312,7 +312,9 @@ the complete-record checks for these reviewed public records.
 linuxdeploy rewrites ELF RPATHs recursively under `usr/lib`, including standalone
 tools. After that pass, packaging restores Node/FFprobe from the verified backend,
 checks their exact original proof, scans the AppDir and runs its native self-test
-with a minimal environment. It then rebuilds the AppImage using only the output
+with a minimal environment. The finalizer and native self-test use the configured
+product name for Linux resources, matching Tauri's `usr/lib/PRODUCT` layout.
+It then rebuilds the AppImage using only the output
 plugin already downloaded and executed by Tauri, without another dependency pass
 or new tool download. The final image is rescanned before replacing the first
 image; no signing credentials or signing options reach the output plugin.

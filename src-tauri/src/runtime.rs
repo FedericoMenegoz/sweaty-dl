@@ -67,7 +67,7 @@ pub fn backend_command(app: &tauri::AppHandle, operation: &str) -> Result<Comman
 }
 
 // Exercise the real installed entry point without opening a WebView or a dev server.
-pub fn run_package_self_test() -> Option<i32> {
+pub fn run_package_self_test(package_name: &str) -> Option<i32> {
     if std::env::args().skip(1).collect::<Vec<_>>() != ["--self-test"] {
         return None;
     }
@@ -84,7 +84,7 @@ pub fn run_package_self_test() -> Option<i32> {
                 .ok_or("Bundle missing")?
                 .join("Resources")
         } else if cfg!(target_os = "linux") {
-            directory.join("../lib").join(env!("CARGO_PKG_NAME"))
+            directory.join("../lib").join(package_name)
         } else {
             directory.to_owned()
         };

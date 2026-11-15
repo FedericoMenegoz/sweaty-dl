@@ -115,7 +115,8 @@ fn restart_app(webview: Webview) -> Result<(), String> {
 }
 
 fn main() {
-    if let Some(code) = runtime::run_package_self_test() {
+    let context = tauri::generate_context!();
+    if let Some(code) = runtime::run_package_self_test(&context.package_info().name) {
         std::process::exit(code);
     }
     tauri::Builder::default()
@@ -158,6 +159,6 @@ fn main() {
             bandcamp_window::confirm_bandcamp,
             bandcamp_window::return_bandcamp_search
         ])
-        .run(tauri::generate_context!())
+        .run(context)
         .expect("Unable to start SweatyDL");
 }

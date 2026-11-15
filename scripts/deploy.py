@@ -156,7 +156,8 @@ def restore_appimage_tools(bundle, toolchain):
     appdir, image = appdirs[0], images[0]
     sources = {name: RESOURCES / '_internal/tools' / name for name in ('node', 'ffprobe')}
     verified_toolchain(sources, toolchain)
-    targets = {name: appdir / 'usr/lib/sweatydl-next/backend/_internal/tools' / name for name in sources}
+    product_name = json.loads((ROOT / 'src-tauri/tauri.conf.json').read_text())['productName']
+    targets = {name: appdir / 'usr/lib' / product_name / 'backend/_internal/tools' / name for name in sources}
     for name, target in targets.items():
         if target.is_symlink() or not target.is_file() or not target.resolve().is_relative_to(appdir.resolve()):
             raise RuntimeError('AppDir has an unexpected standalone tool layout.')

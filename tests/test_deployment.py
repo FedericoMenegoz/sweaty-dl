@@ -25,10 +25,12 @@ class DeploymentTests(unittest.TestCase):
         for unsafe in (False, True):
             with self.subTest(unsafe=unsafe), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
+                (root / 'src-tauri').mkdir()
+                (root / 'src-tauri/tauri.conf.json').write_text('{"productName":"Fixture Product"}')
                 bundle = root / 'bundle'
                 output = bundle / 'appimage'
                 appdir = output / 'App.AppDir'
-                tools = appdir / 'usr/lib/sweatydl-next/backend/_internal/tools'
+                tools = appdir / 'usr/lib/Fixture Product/backend/_internal/tools'
                 tools.mkdir(parents=True)
                 native = appdir / 'usr/bin/sweatydl-next'
                 native.parent.mkdir(parents=True)
@@ -59,7 +61,8 @@ class DeploymentTests(unittest.TestCase):
                     Path(kwargs['env']['OUTPUT']).write_bytes(payload)
                 proof = json.dumps({'ok': True, 'frozen': True, 'qt_loaded': False,
                                     'tools': {'node': 'v22.23.5', 'ffprobe': 'ffprobe version 9.0.2'}})
-                with patch.object(package_backend, 'RESOURCES', resources), \
+                with patch.object(deploy, 'ROOT', root), \
+                        patch.object(package_backend, 'RESOURCES', resources), \
                         patch.object(package_backend, 'verified_toolchain', side_effect=verify) as verification, \
                         patch.object(deploy.subprocess, 'check_output', return_value=proof) as self_test, \
                         patch.object(deploy, 'run', side_effect=package), \
