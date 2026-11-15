@@ -11,6 +11,7 @@ import re
 import shutil
 import subprocess
 import sys
+import sysconfig
 
 ROOT = Path(__file__).resolve().parents[1]
 BUILD = ROOT / '.build' / 'backend'
@@ -63,6 +64,21 @@ def copy_notices(destination):
         inventory.append({'name': name, 'version': distribution.version})
     (destination / 'python-distributions.json').write_text(json.dumps(inventory, indent=2))
     return inventory
+
+
+def copy_python_notice(destination):
+    # Python is not a wheel, so importlib.metadata does not include its license.
+    # Use the active interpreter's installation, including when building in a venv.
+    prefix = Path(sys.base_prefix).resolve()
+    candidates = (Path(sysconfig.get_path('stdlib')) / 'LICENSE.txt', prefix / 'LICENSE.txt')
+    for source in candidates:
+        if (source.is_file() and not source.is_symlink()
+                and source.resolve().is_relative_to(prefix)):
+            folder = destination / 'python'
+            folder.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source, folder / 'LICENSE.txt')
+            return
+    raise RuntimeError('Python runtime license not found in the build interpreter installation.')
 
 
 def copy_tool_notices(tool, destination):
@@ -296,6 +312,7 @@ def package():
         verified_toolchain(bundled_tools, toolchain)
     notices = staged / 'THIRD-PARTY-NOTICES'
     inventory = copy_notices(notices)
+    copy_python_notice(notices)
     strip_metadata_descriptions(staged)
     for path in tools.values():
         copy_tool_notices(path, notices)

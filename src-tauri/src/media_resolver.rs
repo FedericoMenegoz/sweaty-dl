@@ -1,14 +1,15 @@
 //! Metadata-only URL resolution through the existing search worker transport.
-use crate::{diagnostics as diag, download, require_local, runtime};
+use crate::{
+    backend_worker::{self, Job},
+    diagnostics as diag, download, require_local, runtime,
+};
 use serde_json::{json, Value};
 use std::{
-    io::{Read, Write},
-    process::{Child, Command, Stdio},
     sync::{
         atomic::{AtomicBool, Ordering},
-        mpsc, Arc, Mutex,
+        Arc, Mutex,
     },
-    time::{Duration, Instant},
+    time::Duration,
 };
 use tauri::{Manager, Webview};
 
@@ -22,48 +23,6 @@ pub struct ResolverState {
     closing: AtomicBool,
 }
 
-#[derive(Default)]
-struct Job {
-    child: Mutex<Option<Child>>,
-    cancelled: AtomicBool,
-}
-
-impl Job {
-    fn stop(&self) {
-        if let Ok(mut slot) = self.child.lock() {
-            if let Some(mut child) = slot.take() {
-                // Workers can start Node for YouTube extraction. Stop the whole tree
-                // before joining pipe readers, including when a descendant holds EOF.
-                #[cfg(unix)]
-                unsafe {
-                    libc::kill(-(child.id() as i32), libc::SIGKILL);
-                }
-                #[cfg(windows)]
-                {
-                    let _ = Command::new("taskkill")
-                        .args(["/PID", &child.id().to_string(), "/T", "/F"])
-                        .stdout(Stdio::null())
-                        .stderr(Stdio::null())
-                        .status();
-                }
-                let _ = child.kill();
-                let _ = child.wait();
-            }
-        }
-    }
-
-    fn cancel(&self) {
-        self.cancelled.store(true, Ordering::Relaxed);
-        self.stop();
-    }
-}
-
-impl Drop for Job {
-    fn drop(&mut self) {
-        self.stop();
-    }
-}
-
 pub fn shutdown(app: &tauri::AppHandle) {
     let state = app.state::<ResolverState>();
     state.closing.store(true, Ordering::Relaxed);
@@ -75,118 +34,29 @@ pub fn shutdown(app: &tauri::AppHandle) {
 }
 
 fn run_worker(
-    mut command: Command,
+    command: std::process::Command,
     payload: Value,
     job: &Job,
     request: String,
     timeout: Duration,
     output_limit: usize,
 ) -> Result<Value, String> {
-    if job.cancelled.load(Ordering::Relaxed) {
-        return Err(CANCELLED.into());
+    let value = backend_worker::run(
+        command,
+        payload,
+        job,
+        request,
+        "resolve",
+        timeout,
+        output_limit,
+    )?;
+    if let Some(error) = value.get("error").and_then(Value::as_str) {
+        return Err(diag::clean_text(error).chars().take(500).collect());
     }
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        command.process_group(0);
+    if !value.is_object() || value["complete"] != true || !value["results"].is_array() {
+        return Err("Import incomplete; no tracks added.".into());
     }
-    let mut child = command
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|_| "Unable to start importing links.".to_string())?;
-    let mut stdin = child.stdin.take().unwrap();
-    let stdout = child.stdout.take().unwrap();
-    let stderr = child.stderr.take().unwrap();
-    *job.child.lock().unwrap() = Some(child);
-    let stderr_reader = diag::capture_stderr(stderr, "resolve.worker", request.clone());
-    let (writer_tx, writer_rx) = mpsc::channel();
-    let writer = std::thread::spawn(move || {
-        let result = stdin.write_all(payload.to_string().as_bytes());
-        drop(stdin);
-        let _ = writer_tx.send(result);
-    });
-    let (reader_tx, reader_rx) = mpsc::channel();
-    let reader = std::thread::spawn(move || {
-        let mut bytes = Vec::new();
-        let result = stdout.take(output_limit as u64 + 1).read_to_end(&mut bytes);
-        let _ = reader_tx.send(result.map(|_| bytes));
-    });
-    let deadline = Instant::now() + timeout;
-    let mut bytes = None;
-    let mut exited = None;
-    let mut written = false;
-    let result = (|| loop {
-        if job.cancelled.load(Ordering::Relaxed) {
-            return Err(CANCELLED.into());
-        }
-        if Instant::now() >= deadline {
-            return Err("Import timed out after 120 seconds. You can try again.".into());
-        }
-        if !written {
-            match writer_rx.try_recv() {
-                Ok(Ok(())) => written = true,
-                Ok(Err(_)) | Err(mpsc::TryRecvError::Disconnected) => {
-                    return Err("Failed to send the link to the backend.".into());
-                }
-                Err(mpsc::TryRecvError::Empty) => {}
-            }
-        }
-        if bytes.is_none() {
-            match reader_rx.recv_timeout(Duration::from_millis(25)) {
-                Ok(Ok(output)) if output.len() <= output_limit => bytes = Some(output),
-                Ok(Ok(_)) => {
-                    return Err("Playlist response too large; no tracks imported.".into());
-                }
-                Ok(Err(_)) | Err(mpsc::RecvTimeoutError::Disconnected) => {
-                    return Err("Failed to read the playlist from the backend.".into());
-                }
-                Err(mpsc::RecvTimeoutError::Timeout) => {}
-            }
-        } else {
-            std::thread::sleep(Duration::from_millis(10));
-        }
-        if exited.is_none() {
-            let mut slot = job.child.lock().map_err(|_| "Import unavailable.")?;
-            let child = slot.as_mut().ok_or(CANCELLED)?;
-            exited = child
-                .try_wait()
-                .map_err(|_| "The backend stopped unexpectedly.")?;
-        }
-        if let (Some(output), Some(status)) = (bytes.as_ref(), exited.as_ref()) {
-            diag::event(
-                if status.success() { "info" } else { "error" },
-                "resolve",
-                &request,
-                "worker_exit",
-                json!({"code": status.code(), "response_bytes": output.len()}),
-            );
-            if !status.success() {
-                return Err("Import failed. Check the log.".into());
-            }
-            let value: Value = serde_json::from_slice(output)
-                .map_err(|_| "Invalid backend response.".to_string())?;
-            if let Some(error) = value.get("error").and_then(Value::as_str) {
-                return Err(diag::clean_text(error).chars().take(500).collect());
-            }
-            if !value.is_object() || value["complete"] != true || !value["results"].is_array() {
-                return Err("Import incomplete; no tracks added.".into());
-            }
-            return Ok(value);
-        }
-    })();
-    job.stop();
-    // All reader/writer handles belong to this invocation and are reaped after
-    // the worker tree is stopped, on success and every failure path.
-    let _ = writer.join();
-    let _ = reader.join();
-    let _ = stderr_reader.join();
-    if job.cancelled.load(Ordering::Relaxed) {
-        Err(CANCELLED.into())
-    } else {
-        result
-    }
+    Ok(value)
 }
 
 #[tauri::command]
@@ -253,6 +123,7 @@ pub async fn resolve_media_url(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{process::Command, time::Instant};
 
     fn worker(script: &str) -> Command {
         let mut command = Command::new(runtime::development_python());

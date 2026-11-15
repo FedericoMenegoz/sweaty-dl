@@ -1,6 +1,6 @@
 # Building and publishing releases
 
-Once setup and platform verification are complete, pushing to `deployment` runs
+After the one-time setup below, pushing to `deployment` runs
 the existing **Build deployment profiles** workflow.
 It selects a version, runs the existing JavaScript, Python, and Rust checks, and
 builds the configured Intel macOS, Windows x64, and Linux x64 packages using
@@ -29,10 +29,9 @@ SHA-256 checksum. Missing or inconsistent outputs stop publication.
 2. Create a GitHub environment named `release`. Restrict its deployment branches
    to the exact branch `deployment` and store the signing secret in this environment,
    not as a repository-wide secret. Remove any repository-wide copy of the signing
-   secret so unprotected workflows cannot fall back to it. Protect `deployment` with code review and
-   restrict creation of release tags to the intended release identity. Verify
-   that the workflow token can create `v*` tags without bypassing branch protection.
-3. Complete the toolchain and native-platform checks below. Configure the updater
+   secret so unprotected workflows cannot fall back to it. Branch/tag review policies
+   and broader platform validation are tracked in the [release backlog](release-backlog.md).
+3. Complete the minimum activation checks below. Configure the updater
    signing key as described below. Only then set the repository variable
    `RELEASE_ENABLED=true` and create the branch from the reviewed source:
 
@@ -211,11 +210,12 @@ a macOS disk image requires first copying the app to a writable location such
 as Applications; OS-level code signing and notarization remain as configured.
 
 
-## Release readiness and remaining platform work
+## Minimum activation checks
 
-Publication is deliberately disabled until the maintainer sets the repository
-variable `RELEASE_ENABLED=true`. Do not set it until the following checks pass.
-This is a one-time setup gate; enabled deployment pushes remain automatic.
+Publication is disabled until the maintainer approves activation and sets the
+repository variable `RELEASE_ENABLED=true`. The first automated release keeps the
+following requirements. Extended manual validation is tracked in the
+[release backlog](release-backlog.md); it is not an activation prerequisite.
 
 - Validate the pinned native tool preparation on every runner. Node 22.23.5
   platform archives and FFmpeg 9.0.2 source are pinned by SHA-256 in
@@ -225,19 +225,24 @@ This is a one-time setup gate; enabled deployment pushes remain automatic.
   Release builds check the prepared proof and actual bundled tool hashes and
   require a freshly packaged backend. A version floor alone is not proof of origin
   or security.
-- Rebuild each bundled backend with the final source and dependency locks, and
-  exercise installed startup and backend self-tests without system Python. Check
-  that the package contains the intended OS/architecture and current bundled tools.
-- Verify downloaded packages on native macOS, Windows, and Linux, including Debian
-  elevation and AppImage replacement. Verify an update between two versions and
-  failure/retry handling. These hosted/native checks have not been completed here.
-- Review real package contents for secrets, personal paths, metadata, and license
-  obligations. Automated local pattern checks reject known credential formats,
-  home paths, unsafe updater archive entries and machine-owner tar metadata; they
-  are not a complete secret scanner or a native-installer inspection tool. Installer
-  formats with compressed internal files require native extraction/review too.
-- Confirm the environment branch restriction and secret scope in GitHub. No remote
-  settings or secrets have been configured by this implementation.
+- Every native build must pass the JavaScript/Python/Rust checks, backend/native
+  packaging self-tests, tool identity checks and strict package staging for the
+  exact release commit. The release run performs these checks before signing.
+- Keep the existing credential/path, archive, size/hash and provenance checks
+  enabled. Package the interpreter and dependency notices, including the Python
+  runtime license. A known secret leak or serious security issue blocks publication.
+- Confirm the existing private signing key matches the embedded public key. Store
+  it only in the `release` environment, restricted to the exact `deployment` branch.
+  Build jobs must receive no signing secret; signatures and signed versions must
+  verify before publication.
+- Confirm Actions is enabled and the publishing job can use its declared
+  `contents: write` permission. Obtain maintainer approval for the concrete source,
+  environment/secret setup and first publication, then enable the switch last.
+
+Installed GUI, clean-machine startup, version-to-version upgrades and broader
+component-notice review remain untested where listed in the backlog. Automated
+package checks do not establish those results. The [native validation procedure](release-validation.md)
+remains the acceptance procedure for that follow-up work.
 
 CI stages only the manifest's exact expected packages after a successful build.
 The isolated signing job adds signatures and updated checksums. The publishing
@@ -320,7 +325,11 @@ or new tool download. The final image is rescanned before replacing the first
 image; no signing credentials or signing options reach the output plugin.
 
 The backend notices include the exact FFmpeg source archive, license and build
-recipe, along with Node's license. Review redistribution obligations for all bundled
+recipe, along with Node's license. The Python interpreter's own `LICENSE.txt` is
+copied separately from its installation into `THIRD-PARTY-NOTICES/python/`;
+packaging stops if it cannot find that file. Wheel license discovery does not cover
+the interpreter or every native library.
+Review redistribution obligations for all bundled
 components before public distribution; these materials do not constitute a legal
 compliance certification.
 

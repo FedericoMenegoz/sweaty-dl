@@ -245,6 +245,37 @@ class ReleaseSafetyTests(unittest.TestCase):
             names = [path.name for path in (root / 'output/fixture-package').iterdir()]
             self.assertEqual(sorted(names), ['0-LICENSE', '1-MIT.txt'])
 
+    def test_runtime_license_comes_from_active_python_installation(self):
+        for location in ('lib/python3.13/LICENSE.txt', 'LICENSE.txt'):
+            with self.subTest(location=location), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory).resolve()
+                source = root / location
+                source.parent.mkdir(parents=True, exist_ok=True)
+                content = b'Fixture Python license\r\nCopyright fixture\r\n'
+                source.write_bytes(content)
+                with patch.object(package_backend.sys, 'base_prefix', str(root)), patch.object(
+                        package_backend.sysconfig, 'get_path', return_value=str(root / 'lib/python3.13')):
+                    package_backend.copy_python_notice(root / 'notices')
+                self.assertEqual((root / 'notices/python/LICENSE.txt').read_bytes(), content)
+
+    def test_missing_or_external_runtime_license_stops_packaging(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            prefix = root / 'python'
+            prefix.mkdir()
+            outside = root / 'outside'
+            outside.mkdir()
+            (outside / 'LICENSE.txt').write_text('Unrelated fixture license')
+            with patch.object(package_backend.sys, 'base_prefix', str(prefix)), patch.object(
+                    package_backend.sysconfig, 'get_path', return_value=str(outside)):
+                with self.assertRaisesRegex(RuntimeError, 'Python runtime license not found'):
+                    package_backend.copy_python_notice(root / 'notices')
+                self.assertFalse((root / 'notices').exists())
+                if os.name != 'nt':
+                    (prefix / 'LICENSE.txt').symlink_to(outside / 'LICENSE.txt')
+                    with self.assertRaisesRegex(RuntimeError, 'Python runtime license not found'):
+                        package_backend.copy_python_notice(root / 'notices')
+
     def test_runtime_metadata_retains_headers_and_licenses_without_documentation_examples(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

@@ -1,9 +1,9 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use serde_json::{json, Value};
-use std::process::Stdio;
 use tauri::{Manager, Webview};
 
+mod backend_worker;
 mod bandcamp;
 mod bandcamp_window;
 mod diagnostics;
@@ -11,6 +11,7 @@ mod download;
 mod media_resolver;
 mod preview;
 mod runtime;
+mod search_worker;
 
 fn require_local(webview: &Webview, controls: bool) -> Result<(), String> {
     let url = webview.url().map_err(|e| e.to_string())?;
@@ -18,60 +19,6 @@ fn require_local(webview: &Webview, controls: bool) -> Result<(), String> {
         return Err("Command not authorized for this page.".into());
     }
     Ok(())
-}
-
-fn bridge(
-    app: tauri::AppHandle,
-    operation: String,
-    title: String,
-    artist: String,
-    mode: String,
-    request_id: String,
-) -> Result<Value, String> {
-    let mut command = runtime::backend_command(&app, &operation)?;
-    diagnostics::event(
-        "info",
-        "search",
-        &request_id,
-        "spawn_worker",
-        json!({"packaged":cfg!(feature="bundled-backend")}),
-    );
-    let mut child = command
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("Failed to start Python: {e}"))?;
-    let stderr_reader = diagnostics::capture_stderr(
-        child.stderr.take().unwrap(),
-        "search.worker",
-        request_id.clone(),
-    );
-    use std::io::Write;
-    let payload = json!({"operation":operation,"title":title,"artist":artist,"mode":mode,"request_id":request_id});
-    child
-        .stdin
-        .take()
-        .unwrap()
-        .write_all(payload.to_string().as_bytes())
-        .map_err(|e| e.to_string())?;
-    let output = child.wait_with_output().map_err(|e| e.to_string())?;
-    let _ = stderr_reader.join();
-    diagnostics::event(
-        if output.status.success() {
-            "info"
-        } else {
-            "error"
-        },
-        "search",
-        &request_id,
-        "worker_exit",
-        json!({"code":output.status.code()}),
-    );
-    if !output.status.success() {
-        return Err("Search failed in the development backend. Check the log.".into());
-    }
-    serde_json::from_slice(&output.stdout).map_err(|e| format!("Invalid backend response: {e}"))
 }
 
 #[tauri::command]
@@ -89,19 +36,16 @@ async fn search(
     if !["auto", "Bandcamp", "SoundCloud", "YouTube"].contains(&mode.as_str()) {
         return Err("Invalid source.".into());
     }
-    let id = trace_id.unwrap_or_else(|| diagnostics::request_id("search"));
+    let id = trace_id
+        .filter(|id| id.len() <= 128 && !id.chars().any(char::is_control))
+        .unwrap_or_else(|| diagnostics::request_id("search"));
     let mut trace = diagnostics::Span::new(
         "search",
         id.clone(),
         json!({"title":title,"artist":artist,"mode":mode}),
     );
     let app = webview.app_handle().clone();
-    let result = tauri::async_runtime::spawn_blocking(move || {
-        bridge(app, "search".into(), title, artist, mode, id)
-    })
-    .await
-    .map_err(|e| e.to_string())
-    .and_then(|result| result);
+    let result = search_worker::run(app, title, artist, mode, id).await;
     trace.finish(&result);
     result
 }
@@ -111,6 +55,7 @@ fn restart_app(webview: Webview) -> Result<(), String> {
     require_local(&webview, false)?;
     download::shutdown(webview.app_handle());
     media_resolver::shutdown(webview.app_handle());
+    search_worker::shutdown(webview.app_handle());
     webview.app_handle().restart();
 }
 
@@ -125,6 +70,7 @@ fn main() {
         .manage(preview::PreviewState::default())
         .manage(download::DownloadState::default())
         .manage(media_resolver::ResolverState::default())
+        .manage(search_worker::SearchState::default())
         .setup(|app| {
             diagnostics::initialize(app.handle());
             Ok(())
@@ -134,6 +80,7 @@ fn main() {
                 diagnostics::event("info", "app", "", "shutdown", json!({}));
                 download::shutdown(window.app_handle());
                 media_resolver::shutdown(window.app_handle());
+                search_worker::shutdown(window.app_handle());
                 window.app_handle().exit(0);
             }
         })
