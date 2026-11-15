@@ -51,7 +51,7 @@ class UpdaterPackagingTests(unittest.TestCase):
             self.skipTest('macOS archive layout requires Unix symlinks')
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory)
-            app = output / 'mac-1/SweatyDL Next.app'
+            app = output / 'mac-1/SweatyDL.app'
             backend = app / 'Contents/Resources/backend'
             backend.mkdir(parents=True)
             (backend / 'actual').write_bytes(b'frozen runtime')
@@ -61,7 +61,8 @@ class UpdaterPackagingTests(unittest.TestCase):
                 deploy.prepare_update({'os': 'macos', 'name': 'mac-1'}, artifacts, '1.2.3')
             self.assertEqual(len(artifacts), 1)
             with tarfile.open(artifacts[0]) as tar:
-                link = tar.getmember('SweatyDL Next.app/Contents/Resources/backend/linked')
+                self.assertEqual({Path(member.name).parts[0] for member in tar}, {'SweatyDL.app'})
+                link = tar.getmember('SweatyDL.app/Contents/Resources/backend/linked')
                 self.assertTrue(link.issym())
                 self.assertEqual(link.linkname, 'actual')
                 for member in tar:
@@ -71,7 +72,7 @@ class UpdaterPackagingTests(unittest.TestCase):
             import stat
             import zipfile
             with zipfile.ZipFile(archive) as zipped:
-                link = zipped.getinfo('SweatyDL Next.app/Contents/Resources/backend/linked')
+                link = zipped.getinfo('SweatyDL.app/Contents/Resources/backend/linked')
                 self.assertTrue(stat.S_ISLNK(link.external_attr >> 16))
                 self.assertEqual(zipped.read(link), b'actual')
                 self.assertEqual(link.extra, b'')

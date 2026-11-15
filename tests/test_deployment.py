@@ -91,7 +91,7 @@ class DeploymentTests(unittest.TestCase):
                 if command[:2] == ['hdiutil', 'attach']:
                     self.assertIn('-readonly', command)
                     mount = Path(command[command.index('-mountpoint') + 1])
-                    (mount / 'SweatyDL Next.app').mkdir()
+                    (mount / 'SweatyDL.app').mkdir()
                     (mount / 'Applications').symlink_to('/Applications')
                     return subprocess.CompletedProcess(command, 0, stdout=plistlib.dumps({
                         'system-entities': [{'mount-point': str(mount)}]}))
@@ -102,7 +102,45 @@ class DeploymentTests(unittest.TestCase):
                 with self.assertRaises(subprocess.CalledProcessError):
                     deploy.make_disk_image(root / 'stage', root / 'test.dmg')
             self.assertEqual(commands[-1][:2], ['hdiutil', 'detach'])
+            self.assertEqual(commands[0][commands[0].index('-volname') + 1], 'SweatyDL')
             self.assertFalse(any('makehybrid' in command for command in commands))
+
+    def test_mac_build_and_updater_use_renamed_bundle_without_selecting_stale_app(self):
+        import package_backend
+        profile = {**next(item for item in deploy.profiles() if item['os'] == 'macos'),
+                   'formats': ['app.zip']}
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'package.json').write_text('{"version":"0.1.2"}')
+            resources = root / 'backend'
+            resources.mkdir()
+            (resources / 'build-info.json').write_text(json.dumps({
+                'ok': True, 'frozen': True, 'os': 'Darwin', 'arch': 'x86_64'}))
+            (resources / 'sweatydl-backend').write_bytes(b'backend fixture')
+            bundle = root / 'src-tauri/target' / profile['target'] / 'release/bundle/macos'
+            (bundle / 'SweatyDL Next.app').mkdir(parents=True)
+            native = bundle / 'SweatyDL.app/Contents/MacOS/sweatydl-next'
+            native.parent.mkdir(parents=True)
+            native.write_bytes(b'current native fixture')
+            output = root / 'deployments'
+            with patch.object(deploy, 'ROOT', root), patch.object(deploy, 'OUTPUT', output), \
+                    patch.object(package_backend, 'RESOURCES', resources), \
+                    patch('deploy.platform.system', return_value='Darwin'), \
+                    patch('deploy.shutil.which', return_value='npm'), patch.object(deploy, 'run'), \
+                    patch.object(deploy.subprocess, 'check_output', return_value='{"ok":true}'), \
+                    patch.dict(os.environ, {'SWEATYDL_RELEASE_BUILD': '0'}):
+                artifacts = deploy.build(profile, skip_backend=True, updater=True)
+            configuration = json.loads((root / '.build/tauri-mac-1.json').read_text())
+            self.assertEqual(configuration['productName'], 'SweatyDL')
+            self.assertNotIn('identifier', configuration)
+            self.assertNotIn('plugins', configuration)
+            self.assertTrue((output / 'mac-1/SweatyDL.app/Contents/Resources/backend/sweatydl-backend').is_file())
+            self.assertFalse((output / 'mac-1/SweatyDL Next.app').exists())
+            archive = next(root / item['file'] for item in artifacts if item['file'].endswith('.app.zip'))
+            with zipfile.ZipFile(archive) as zipped:
+                self.assertEqual(zipped.read('SweatyDL.app/Contents/MacOS/sweatydl-next'), b'current native fixture')
+                self.assertTrue(all(name.startswith('SweatyDL.app') for name in zipped.namelist()))
+            self.assertEqual(len(artifacts), 2)
 
     def test_windows_build_manifest_stages_with_portable_paths_and_verified_bytes(self):
         import package_backend

@@ -26,6 +26,8 @@ SUPPORTED = {('macos', 'x86_64'): ('x86_64-apple-darwin', ['dmg', 'app.zip']),
              ('linux', 'x86_64'): ('x86_64-unknown-linux-gnu', ['deb', 'AppImage'])}
 
 LINUX_BUNDLE_EXTENSIONS = {'deb': 'deb', 'AppImage': 'AppImage'}
+MACOS_PRODUCT_NAME = 'SweatyDL'
+MACOS_APP_NAME = MACOS_PRODUCT_NAME + '.app'
 
 
 def profiles(root=PROFILES):
@@ -85,7 +87,7 @@ def build_kit(destination):
 
 def make_disk_image(stage, destination):
     try:
-        run(['hdiutil', 'create', '-volname', 'SweatyDL Next', '-srcfolder', stage, '-ov', '-format', 'UDZO', destination])
+        run(['hdiutil', 'create', '-volname', MACOS_PRODUCT_NAME, '-srcfolder', stage, '-ov', '-format', 'UDZO', destination])
     except subprocess.CalledProcessError:
         # The hybrid HFS fallback adds Finder metadata that invalidates strict
         # app signatures. A real DMG requires native DiskImages access.
@@ -101,7 +103,7 @@ def make_disk_image(stage, destination):
             entities = plistlib.loads(result.stdout).get('system-entities', [])
             if not any(item.get('mount-point') == str(mount) for item in entities):
                 raise RuntimeError('Disk image did not mount at its inspection directory.')
-            app = mount / 'SweatyDL Next.app'
+            app = mount / MACOS_APP_NAME
             applications = mount / 'Applications'
             if not app.is_dir() or not applications.is_symlink() or applications.readlink() != Path('/Applications'):
                 raise RuntimeError('Disk image has an unexpected application layout.')
@@ -130,7 +132,7 @@ def make_app_zip(app, destination):
 
 def prepare_update(profile, artifacts, version):
     if profile['os'] == 'macos':
-        app = OUTPUT / profile['name'] / 'SweatyDL Next.app'
+        app = OUTPUT / profile['name'] / MACOS_APP_NAME
         update = app.parent / f'SweatyDL-Next_{version}_{profile["name"]}_x64.app.tar.gz'
         # Archive the final app AFTER backend symlinks are restored and codesign
         # succeeds, so the updater installs exactly the validated application.
@@ -211,6 +213,7 @@ def build(profile, skip_backend=False, updater=False):
     directory.mkdir(parents=True, exist_ok=True)
     configuration = {'bundle': {'active': True, 'resources': {'resources/backend/': 'backend/'}}}
     if profile['os'] == 'macos':
+        configuration['productName'] = MACOS_PRODUCT_NAME
         configuration['bundle']['macOS'] = {'minimumSystemVersion': profile['minimum_os']}
     elif profile['os'] == 'windows':
         configuration['bundle']['windows'] = {'minimumWebview2Version': '110.0.1587.0', 'webviewInstallMode': {'type': 'downloadBootstrapper', 'silent': True}}
@@ -239,8 +242,8 @@ def build(profile, skip_backend=False, updater=False):
         restore_appimage_tools(bundle, proof['toolchain'])
     artifacts = []
     if profile['os'] == 'macos':
-        source = next((bundle / 'macos').glob('*.app'))
-        app = directory / 'SweatyDL Next.app'
+        source = bundle / 'macos' / MACOS_APP_NAME
+        app = directory / MACOS_APP_NAME
         if app.exists():
             shutil.rmtree(app)
         shutil.copytree(source, app, symlinks=True)

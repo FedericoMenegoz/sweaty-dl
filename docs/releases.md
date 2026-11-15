@@ -65,8 +65,8 @@ count, without leading zeroes, prerelease suffixes, or build metadata. With no
 version tags, the first successful release is `v1.0.0`. Otherwise, the highest
 numeric SemVer tag determines the next PATCH version, regardless of tag creation
 date or ancestry. For example, `v1.9.9` and `v1.10.0` produce `v1.10.1`.
-This repository already has `v0.1.0`, so its next release is `v0.1.1` unless
-another version tag is introduced first.
+For example, a highest tag of `v0.1.1` produces `v0.1.2` unless another version
+tag is introduced first.
 
 The selected version is applied to the npm manifest and lockfile, Tauri config,
 and Rust manifest and lockfile only in the build checkout. No version bump commit
@@ -208,6 +208,9 @@ Users of earlier builds without an updater must install an updater-enabled
 release once. Subsequent updates can be installed from the app. Installing from
 a macOS disk image requires first copying the app to a writable location such
 as Applications; OS-level code signing and notarization remain as configured.
+The macOS installer contains `SweatyDL.app`. An in-app update replaces the bundle
+at its existing installation path, so a legacy `SweatyDL Next.app` installation
+keeps that filesystem name while its app metadata and version are updated.
 
 
 ## Minimum activation checks
