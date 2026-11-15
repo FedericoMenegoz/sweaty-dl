@@ -105,43 +105,56 @@ def strip_metadata_descriptions(staged):
             path.write_bytes(headers + separator)
 
 
-def normalize_pyexpat_cstrings(data):
+PYTHON_DIAGNOSTIC_SOURCES = (
+    b'/Modules/pyexpat.c', b'/Modules/arraymodule.c', b'/Modules/_ssl.c',
+    b'/Modules/sha3module.c', b'/Modules/_hacl/Hacl_Hash_SHA3.c',
+)
+
+
+def normalize_python_cstrings(data):
     # CPython's __FILE__ constants describe C error locations, not runtime
     # lookup paths. Keep string sizes and suffix offsets unchanged.
-    suffix = b'/Modules/pyexpat.c'
     strings = data.split(b'\0')
     for index, value in enumerate(strings):
-        if value.startswith((b'/Users/', b'/home/')) and value.endswith(suffix):
+        suffix = next((suffix for suffix in PYTHON_DIAGNOSTIC_SOURCES if value.endswith(suffix)), None)
+        if suffix and value.startswith((b'/Users/', b'/home/')):
             prefix_size = len(value) - len(suffix)
             if prefix_size >= len(b'/source'):
                 strings[index] = b'/source' + b'_' * (prefix_size - len(b'/source')) + suffix
     return b'\0'.join(strings)
 
 
-def prepare_pyexpat(destination):
+def prepare_python_extensions(destination, extension_root=None):
     from macholib.MachO import MachO
-    source = Path(importlib.util.find_spec('pyexpat').origin)
-    data = source.read_bytes()
-    prepared = bytearray(data)
-    # Restrict changes to source-filename constants in the read-only string
-    # section; executable code, other strings and the installed Python stay intact.
-    for header in MachO(str(source)).headers:
-        for _, _, sections in header.commands:
-            if not isinstance(sections, list):
-                continue
-            for section in sections:
-                if (section.segname.rstrip(b'\0') == b'__TEXT'
-                        and section.sectname.rstrip(b'\0') == b'__cstring'):
-                    start = header.offset + section.offset
-                    end = start + section.size
-                    prepared[start:end] = normalize_pyexpat_cstrings(data[start:end])
-    if prepared == data:
-        return None
+    if extension_root is None:
+        extension_root = Path(importlib.util.find_spec('array').origin).parent
     destination.mkdir(parents=True, exist_ok=True)
-    (destination / source.name).write_bytes(prepared)
+    # This directory contains only generated Analysis inputs. A clean extension
+    # must never be shadowed by a prior interpreter's normalized copy.
+    for previous in destination.glob('*.so'):
+        previous.unlink()
+    changed = False
+    for source in sorted(extension_root.glob('*.so')):
+        data = source.read_bytes()
+        prepared = bytearray(data)
+        # Only the reviewed CPython diagnostic filenames in read-only strings
+        # change. Instructions and the installed interpreter remain intact.
+        for header in MachO(str(source)).headers:
+            for _, _, sections in header.commands:
+                if not isinstance(sections, list):
+                    continue
+                for section in sections:
+                    if (section.segname.rstrip(b'\0') == b'__TEXT'
+                            and section.sectname.rstrip(b'\0') == b'__cstring'):
+                        start = header.offset + section.offset
+                        end = start + section.size
+                        prepared[start:end] = normalize_python_cstrings(data[start:end])
+        if prepared != data:
+            (destination / source.name).write_bytes(prepared)
+            changed = True
     # This is an Analysis input. PyInstaller applies its ordinary Mach-O
     # processing and ad-hoc signature after collecting this extension.
-    return destination
+    return destination if changed else None
 
 
 def verified_toolchain(tools, proof=None):
@@ -194,7 +207,7 @@ def package():
         # paths before its existing Mach-O processing and ad-hoc signing.
         # Pinned tools are copied separately after freezing.
         command.append('--strip')
-        normalized = prepare_pyexpat(BUILD / 'python-input')
+        normalized = prepare_python_extensions(BUILD / 'python-input')
         if normalized:
             command.extend(['--paths', str(normalized)])
     for module in ('PySide6', 'PyQt6', 'PyQt5', 'PySide2', 'shiboken6', 'tkinter', 'matplotlib', 'numpy', 'scipy', 'pandas'):

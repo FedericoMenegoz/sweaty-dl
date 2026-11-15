@@ -273,11 +273,12 @@ descriptions are omitted to avoid shipping documentation path examples; metadata
 headers and license notices are retained.
 
 On macOS, Python extension debug symbols are removed with PyInstaller's `strip -S`
-processing. If pyexpat embeds its upstream builder's home directory in C error
-source filenames, only those `Modules/pyexpat.c` constants in the Mach-O read-only
-string section receive a neutral prefix before freezing. Their lengths and suffix
-offsets stay unchanged; executable instructions and the installed Python remain
-untouched. PyInstaller then applies its existing ad-hoc signature processing.
+processing. Reviewed C error source filenames in the pyexpat, array, SSL and
+SHA-3 extensions receive a neutral prefix in the Mach-O read-only string section
+before freezing. Only the exact CPython source filenames listed in the packaging
+script are normalized. String lengths and suffix offsets stay unchanged;
+executable instructions and the installed Python remain untouched. PyInstaller
+then applies its existing ad-hoc signature processing.
 Prepared Node/FFprobe files are copied after freezing and checked again against
 their original toolchain proof.
 Disk images require native macOS DiskImages access. Packaging mounts each image
@@ -290,6 +291,12 @@ link and exact Node-hash checks used for the backend. Inspection never executes
 an AppImage. The extractor receives no inherited credentials or signing keys;
 missing tools or extraction failures stop staging. CI installs `squashfs-tools`
 from the same signed Ubuntu package repositories used for its other native tools.
+GTK 3.24.33 contains two SVG editor export-filename records already published in
+its Adwaita/HighContrast theme sources. Only the digests of those complete quoted
+attributes are recognized as public metadata; their path text is neither stored
+in scanner configuration nor printed. This does not exempt GTK libraries as a
+whole. Changed records and other home paths still fail, and credential checks
+always inspect the original bytes.
 
 The backend notices include the exact FFmpeg source archive, license and build
 recipe, along with Node's license. Review redistribution obligations for all bundled

@@ -27,13 +27,38 @@ class ReleaseSafetyTests(unittest.TestCase):
         original = b'/Users/fixture-owner/build/Python/Modules/pyexpat.c'
         other = b'/Users/fixture-owner/build/Python/Modules/other.c'
         data = b'unchanged\0' + original + b'\0' + other + b'\0'
-        result = package_backend.normalize_pyexpat_cstrings(data)
+        result = package_backend.normalize_python_cstrings(data)
         self.assertEqual(len(result), len(data))
         self.assertEqual(result.split(b'\0')[0], b'unchanged')
         self.assertEqual(result.split(b'\0')[2], other)
         self.assertNotIn(original, result)
         self.assertTrue(result.split(b'\0')[1].endswith(b'/Modules/pyexpat.c'))
         self.assertEqual(result.index(b'/Modules/pyexpat.c'), data.index(b'/Modules/pyexpat.c'))
+
+    def test_reviewed_python_diagnostics_cover_other_extensions_without_generic_replacement(self):
+        for suffix in package_backend.PYTHON_DIAGNOSTIC_SOURCES:
+            original = b'/Users/fixture-owner/build/Python' + suffix
+            result = package_backend.normalize_python_cstrings(original + b'\0')
+            self.assertEqual(len(result), len(original) + 1)
+            self.assertTrue(result.endswith(suffix + b'\0'))
+            self.assertNotIn(b'fixture-owner', result)
+        unknown = b'/Users/fixture-owner/build/Python/Modules/unreviewed.c\0'
+        self.assertEqual(package_backend.normalize_python_cstrings(unknown), unknown)
+
+    def test_only_exact_reviewed_svg_export_records_avoid_false_home_rejection(self):
+        import hashlib
+        record = b'inkscape:export-filename="/home/fixture-owner/public-icon.png"'
+        digest = hashlib.sha256(record).hexdigest()
+        with patch.object(release_safety, 'PUBLIC_SVG_EXPORT_RECORDS', frozenset({digest})):
+            for prefix in (b'', b'\0' * (1024 * 1024 - len(record) // 2),
+                           b'\0' * (1024 * 1024 - 4096 - 8)):
+                release_safety.scan_stream(io.BytesIO(prefix + record + b'\0'))
+            for value in (record.replace(b'public-icon', b'changed-icon'),
+                          b'/home/fixture-owner/public-icon.png',
+                          record + b'/home/fixture-owner/private-file',
+                          record + b'ghp_' + b'X' * 36):
+                with self.assertRaises(ValueError):
+                    release_safety.scan_stream(io.BytesIO(value))
 
     def test_scan_reports_offset_across_read_boundaries_without_path_bytes(self):
         prefix = b'\0' * (1024 * 1024 - 3)

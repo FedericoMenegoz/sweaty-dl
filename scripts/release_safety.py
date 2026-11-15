@@ -17,6 +17,28 @@ PRIVATE_DATA = re.compile(
     rb'-----BEGIN (?:RSA |EC |OPENSSH |ENCRYPTED )?PRIVATE KEY-----\s+[A-Za-z0-9+/]{32}'
     rb'|\b(?:gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{40,})\b')
 LOCAL_HOME = re.compile(rb'(?:/Users/|/home/|[A-Z]:\\Users\\)(?!runner(?:[ /\\\x00]|$)|Public[ /\\\x00]|Default[ /\\\x00])[^\s/\\\x00]{2,}')
+# Exact SVG editor metadata published in GTK 3.24.33's Adwaita/HighContrast
+# assets/{bullet,check,dash}-symbolic.svg. Store digests, never home-path text.
+# https://gitlab.gnome.org/GNOME/gtk/-/tree/3.24.33/gtk/theme/Adwaita/assets
+PUBLIC_SVG_EXPORT_RECORDS = frozenset({
+    '1487ec679e10c1e07c9fd11628177e569e84d5fb2f373d74dc56fa7d90b957ee',
+    '97ae80094e1903329ae2d3cd7dfe329e478dbe64d851e7b63326c11b762d8a2c',
+})
+SVG_EXPORT_RECORD = re.compile(rb'inkscape:export-filename="[^"\0\r\n]{1,512}"')
+
+
+def _mask_public_svg_records(data):
+    def mask_public_record(match):
+        value = match.group()
+        return b'\0' * len(value) if hashlib.sha256(value).hexdigest() in PUBLIC_SVG_EXPORT_RECORDS else value
+    return SVG_EXPORT_RECORD.sub(mask_public_record, data)
+
+
+def _home_match(data, final=False):
+    # Defer the tail until the next read (or EOF), so a split attribute cannot
+    # cause a partial match before its complete record can be checked.
+    limit = len(data) if final else max(0, len(data) - 4096)
+    return next((match for match in LOCAL_HOME.finditer(data) if match.start() < limit), None)
 
 
 def _safe_label(value):
@@ -65,12 +87,16 @@ def check_link(name, linkname, hardlink=False):
 
 def scan_stream(stream, label=None, *, home_paths=True):
     tail = b''
+    home_tail = b''
     digest = hashlib.sha256()
     home_offset = None
     scanned_bytes = 0
     while True:
         block = stream.read(1024 * 1024)
         if not block:
+            match = _home_match(home_tail, final=True) if home_paths else None
+            if home_offset is None and match:
+                home_offset = scanned_bytes - len(home_tail) + match.start()
             if home_offset is not None:
                 # Prepared Node binaries contain upstream build paths. Allow
                 # only the exact reviewed images derived from signed archives;
@@ -85,9 +111,13 @@ def scan_stream(stream, label=None, *, home_paths=True):
         if PRIVATE_DATA.search(data):
             # Never include the match in errors or CI logs.
             raise _scan_error('credential pattern', label)
-        match = LOCAL_HOME.search(data) if home_paths else None
-        if home_offset is None and match:
-            home_offset = scanned_bytes - len(tail) + match.start()
+        if home_paths:
+            home_data = _mask_public_svg_records(home_tail + block)
+            match = _home_match(home_data)
+            if home_offset is None and match:
+                home_offset = scanned_bytes - len(home_tail) + match.start()
+            # Retain masked context as well as the raw credential-scanning tail.
+            home_tail = home_data[-4096:]
         scanned_bytes += len(block)
         tail = data[-4096:]
 
