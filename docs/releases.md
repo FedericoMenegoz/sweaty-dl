@@ -273,14 +273,17 @@ descriptions are omitted to avoid shipping documentation path examples; metadata
 headers and license notices are retained.
 
 On macOS, Python extension debug symbols are removed with PyInstaller's `strip -S`
-processing. Reviewed C error source filenames in the pyexpat, array, SSL and
-SHA-3 extensions receive a neutral prefix in the Mach-O read-only string section
+processing. Reviewed C error source filenames in the runtime and its pyexpat,
+array, SSL and SHA-3 extensions receive a neutral prefix in the read-only string section
 before freezing. Only the exact CPython source filenames listed in the packaging
 script are normalized. String lengths and suffix offsets stay unchanged;
 executable instructions and the installed Python remain untouched. PyInstaller
 then applies its existing ad-hoc signature processing.
 The generated spec selects normalized stdlib inputs after Analysis, including
 cached modules; dependency discovery still uses the installed originals.
+The exact public source-tree (VPATH) C string from the Actions Python 3.13.15
+macOS archive is recognized by digest and NUL termination. Runtime lookup
+metadata remains unchanged; unknown or changed build paths still fail scanning.
 Prepared Node/FFprobe files are copied after freezing and checked again against
 their original toolchain proof.
 Disk images require native macOS DiskImages access. Packaging mounts each image
@@ -305,6 +308,14 @@ are recognized by digest. No key bytes are stored in scanner configuration or
 printed. Partial or changed blocks, unknown keys and tokens remain rejected;
 the library and its self-tests are not modified. Stream boundaries preserve
 the complete-record checks for these reviewed public records.
+
+linuxdeploy rewrites ELF RPATHs recursively under `usr/lib`, including standalone
+tools. After that pass, packaging restores Node/FFprobe from the verified backend,
+checks their exact original proof, scans the AppDir and runs its native self-test
+with a minimal environment. It then rebuilds the AppImage using only the output
+plugin already downloaded and executed by Tauri, without another dependency pass
+or new tool download. The final image is rescanned before replacing the first
+image; no signing credentials or signing options reach the output plugin.
 
 The backend notices include the exact FFmpeg source archive, license and build
 recipe, along with Node's license. Review redistribution obligations for all bundled

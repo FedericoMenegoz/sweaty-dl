@@ -145,6 +145,53 @@ def prepare_update(profile, artifacts, version):
         artifacts.append(update)
 
 
+def restore_appimage_tools(bundle, toolchain):
+    from package_backend import RESOURCES, verified_toolchain, validate_release_tools
+    from release_safety import scan_artifact, scan_tree
+    directory = bundle / 'appimage'
+    appdirs = [path for path in directory.glob('*.AppDir') if path.is_dir() and not path.is_symlink()]
+    images = list(directory.glob('*.AppImage'))
+    if len(appdirs) != 1 or len(images) != 1:
+        raise RuntimeError('Expected one AppDir and AppImage before restoring verified tools.')
+    appdir, image = appdirs[0], images[0]
+    sources = {name: RESOURCES / '_internal/tools' / name for name in ('node', 'ffprobe')}
+    verified_toolchain(sources, toolchain)
+    targets = {name: appdir / 'usr/lib/sweatydl-next/backend/_internal/tools' / name for name in sources}
+    for name, target in targets.items():
+        if target.is_symlink() or not target.is_file() or not target.resolve().is_relative_to(appdir.resolve()):
+            raise RuntimeError('AppDir has an unexpected standalone tool layout.')
+        shutil.copy2(sources[name], target)
+    verified_toolchain(targets, toolchain)
+    scan_tree(appdir)
+    # Exercise the package entry point with its real resource layout before
+    # compression, without development runtimes or inherited credentials.
+    clean = {'PATH': '/usr/bin:/bin', 'LC_ALL': 'C'}
+    result = subprocess.check_output([str(appdir / 'usr/bin/sweatydl-next'), '--self-test'],
+                                     env=clean, cwd=directory, text=True, timeout=180)
+    proof = json.loads(result)
+    if not proof.get('ok') or not proof.get('frozen') or proof.get('qt_loaded'):
+        raise RuntimeError('Restored AppDir native self-test failed.')
+    validate_release_tools(proof)
+    cache = Path(os.environ.get('XDG_CACHE_HOME', ''))
+    if not cache.is_absolute():
+        cache = Path.home() / '.cache'
+    plugin = cache / 'tauri/linuxdeploy-plugin-appimage.AppImage'
+    if plugin.is_symlink() or not plugin.is_file():
+        raise RuntimeError('The AppImage output tool already used by Tauri is missing.')
+    # linuxdeploy rewrites every ELF under usr/lib, including standalone Node.
+    # Restore prepared bytes after that pass and reuse only its output plugin;
+    # a second linuxdeploy pass would rewrite them again. No new tool download.
+    with tempfile.TemporaryDirectory(prefix='appimage-final-', dir=directory) as temporary:
+        output = Path(temporary) / image.name
+        environment = {**clean, 'ARCH': 'x86_64', 'APPIMAGE_EXTRACT_AND_RUN': '1',
+                       'OUTPUT': str(output), 'LDAI_OUTPUT': str(output)}
+        run([plugin, '--appimage-extract-and-run', '--appdir', appdir], env=environment)
+        if output.is_symlink() or not output.is_file():
+            raise RuntimeError('AppImage output tool did not produce the restored package.')
+        scan_artifact(output)
+        shutil.copy2(output, image)
+
+
 def build(profile, skip_backend=False, updater=False):
     from package_backend import package, RESOURCES, validate_release_tools, verified_toolchain
     if skip_backend and os.environ.get('SWEATYDL_RELEASE_BUILD') == '1':
@@ -187,6 +234,8 @@ def build(profile, skip_backend=False, updater=False):
     run([npm, 'run', 'tauri', '--', 'build', '--features', 'bundled-backend', '--config', config_path,
          '--target', profile['target'], '--bundles', bundles[profile['os']]], env=environment)
     bundle = ROOT / 'src-tauri' / 'target' / profile['target'] / 'release' / 'bundle'
+    if profile['os'] == 'linux' and 'AppImage' in profile['formats'] and proof.get('toolchain'):
+        restore_appimage_tools(bundle, proof['toolchain'])
     artifacts = []
     if profile['os'] == 'macos':
         source = next((bundle / 'macos').glob('*.app'))

@@ -24,6 +24,17 @@ import updater_manifest
 
 
 class ReleaseSafetyTests(unittest.TestCase):
+    def test_only_complete_reviewed_build_cstring_preserves_lookup_metadata(self):
+        import hashlib
+        value = b'/Users/fixture-owner/public-source-root'
+        digest = hashlib.sha256(value).hexdigest()
+        with patch.object(release_safety, 'PUBLIC_BUILD_CSTRINGS', frozenset({digest})):
+            for size in (0, 1024 * 1024 - len(value) // 2, 1024 * 1024 - 4096 - 8):
+                release_safety.scan_stream(io.BytesIO(b'\0' * size + value + b'\0'))
+            for data in (value, value + b'-changed\0', value + b'\0ghp_' + b'X' * 36):
+                with self.assertRaises(ValueError):
+                    release_safety.scan_stream(io.BytesIO(data))
+
     def test_only_complete_reviewed_public_pem_vectors_are_accepted(self):
         import hashlib
         # Intentionally invalid synthetic fixture, never a generated private key.
@@ -45,21 +56,26 @@ class ReleaseSafetyTests(unittest.TestCase):
             normalized = root / "normalized-inputs'quoted"
             normalized.mkdir()
             (normalized / 'array.so').write_bytes(b'normalized fixture')
+            (normalized / 'Python').write_bytes(b'normalized runtime fixture')
             other = root / 'third-party/array.so'
             entries = [('stdlib/array.so', str(original), 'EXTENSION'),
-                       ('other/array.so', str(other), 'BINARY')]
+                       ('other/array.so', str(other), 'BINARY'),
+                       ('Python.framework/Python', str(root / 'Python'), 'BINARY')]
             spec = root / 'fixture.spec'
             spec.write_text('a = initial\npyz = PYZ(a.pure)\n')
             with patch.object(package_backend.importlib.util, 'find_spec',
-                              return_value=SimpleNamespace(origin=str(original))):
+                              return_value=SimpleNamespace(origin=str(original))), \
+                    patch.object(package_backend, 'python_library_path', return_value=(root / 'Python').resolve()):
                 package_backend.select_normalized_inputs(spec, normalized)
             context = {'initial': SimpleNamespace(binaries=entries, pure=[]), 'PYZ': lambda pure: pure}
             exec(compile(spec.read_text(), str(spec), 'exec'), context)
             self.assertEqual(context['a'].binaries[0][1], str((normalized / 'array.so').resolve()))
             self.assertEqual(context['a'].binaries[1], entries[1])
+            self.assertEqual(context['a'].binaries[2][1], str((normalized / 'Python').resolve()))
             spec.write_text('unexpected generated spec')
             with self.assertRaisesRegex(RuntimeError, 'Unexpected PyInstaller spec'):
-                package_backend.select_normalized_inputs(spec, normalized)
+                with patch.object(package_backend, 'python_library_path', return_value=(root / 'Python').resolve()):
+                    package_backend.select_normalized_inputs(spec, normalized)
 
     def test_python_source_filename_normalization_preserves_other_strings_and_offsets(self):
         original = b'/Users/fixture-owner/build/Python/Modules/pyexpat.c'

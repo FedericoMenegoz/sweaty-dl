@@ -1,5 +1,6 @@
 import hashlib
 import json
+import os
 from pathlib import Path
 import plistlib
 import subprocess
@@ -19,6 +20,63 @@ import updater_manifest
 
 
 class DeploymentTests(unittest.TestCase):
+    def test_appimage_finalization_restores_tools_and_rejects_unsafe_output_without_replacing_image(self):
+        import package_backend
+        for unsafe in (False, True):
+            with self.subTest(unsafe=unsafe), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                bundle = root / 'bundle'
+                output = bundle / 'appimage'
+                appdir = output / 'App.AppDir'
+                tools = appdir / 'usr/lib/sweatydl-next/backend/_internal/tools'
+                tools.mkdir(parents=True)
+                native = appdir / 'usr/bin/sweatydl-next'
+                native.parent.mkdir(parents=True)
+                native.write_bytes(b'native fixture')
+                image = output / 'App.AppImage'
+                image.write_bytes(b'original package')
+                resources = root / 'resources'
+                sources = resources / '_internal/tools'
+                sources.mkdir(parents=True)
+                expected = {name: ('verified ' + name).encode() for name in ('node', 'ffprobe')}
+                for name, value in expected.items():
+                    (sources / name).write_bytes(value)
+                    (tools / name).write_bytes(b'linuxdeploy-modified fixture')
+                cache = root / 'cache'
+                plugin = cache / 'tauri/linuxdeploy-plugin-appimage.AppImage'
+                plugin.parent.mkdir(parents=True)
+                plugin.write_bytes(b'packaging tool fixture; execution mocked')
+                def verify(paths, proof):
+                    self.assertEqual(proof, {'fixture': True})
+                    for name, path in paths.items():
+                        self.assertEqual(path.read_bytes(), expected[name])
+                def package(command, **kwargs):
+                    self.assertEqual(command[:2], [plugin, '--appimage-extract-and-run'])
+                    self.assertNotIn('TAURI_SIGNING_PRIVATE_KEY', kwargs['env'])
+                    self.assertNotIn('GITHUB_TOKEN', kwargs['env'])
+                    self.assertNotIn('SIGN', kwargs['env'])
+                    payload = b'ghp_' + b'X' * 36 if unsafe else b'restored package'
+                    Path(kwargs['env']['OUTPUT']).write_bytes(payload)
+                proof = json.dumps({'ok': True, 'frozen': True, 'qt_loaded': False,
+                                    'tools': {'node': 'v22.23.5', 'ffprobe': 'ffprobe version 9.0.2'}})
+                with patch.object(package_backend, 'RESOURCES', resources), \
+                        patch.object(package_backend, 'verified_toolchain', side_effect=verify) as verification, \
+                        patch.object(deploy.subprocess, 'check_output', return_value=proof) as self_test, \
+                        patch.object(deploy, 'run', side_effect=package), \
+                        patch.dict(os.environ, {'XDG_CACHE_HOME': str(cache),
+                                               'TAURI_SIGNING_PRIVATE_KEY': 'fixture-only',
+                                               'GITHUB_TOKEN': 'fixture-only', 'SIGN': '1'}):
+                    if unsafe:
+                        with self.assertRaisesRegex(ValueError, 'credential pattern'):
+                            deploy.restore_appimage_tools(bundle, {'fixture': True})
+                    else:
+                        deploy.restore_appimage_tools(bundle, {'fixture': True})
+                    self.assertEqual(verification.call_count, 2)
+                    self.assertEqual(self_test.call_args.kwargs['env'], {'PATH': '/usr/bin:/bin', 'LC_ALL': 'C'})
+                self.assertEqual(image.read_bytes(), b'original package' if unsafe else b'restored package')
+                for name, value in expected.items():
+                    self.assertEqual((tools / name).read_bytes(), value)
+
     def test_disk_image_signature_failure_detaches_the_read_only_mount(self):
         if sys.platform == 'win32':
             self.skipTest('macOS disk-image layout requires Unix symlinks')

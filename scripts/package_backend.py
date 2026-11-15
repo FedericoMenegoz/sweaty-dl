@@ -108,6 +108,16 @@ def strip_metadata_descriptions(staged):
 PYTHON_DIAGNOSTIC_SOURCES = (
     b'/Modules/pyexpat.c', b'/Modules/arraymodule.c', b'/Modules/_ssl.c',
     b'/Modules/sha3module.c', b'/Modules/_hacl/Hacl_Hash_SHA3.c',
+    b'/Objects/abstract.c', b'/Objects/bytearrayobject.c', b'/Objects/bytesobject.c',
+    b'/Objects/cellobject.c', b'/Objects/classobject.c', b'/Objects/codeobject.c',
+    b'/Objects/dictobject.c', b'/Objects/fileobject.c', b'/Objects/frameobject.c',
+    b'/Objects/funcobject.c', b'/Objects/iterobject.c', b'/Objects/listobject.c',
+    b'/Objects/longobject.c', b'/Objects/memoryobject.c', b'/Objects/methodobject.c',
+    b'/Objects/moduleobject.c', b'/Objects/object.c', b'/Objects/setobject.c',
+    b'/Objects/structseq.c', b'/Objects/tupleobject.c', b'/Objects/typeobject.c',
+    b'/Objects/unicodeobject.c', b'/Objects/weakrefobject.c', b'/Parser/string_parser.c',
+    b'/Python/ceval_gil.c', b'/Python/gc.c', b'/Python/getargs.c', b'/Python/import.c',
+    b'/Python/pystrtod.c', b'/Python/traceback.c',
 )
 
 
@@ -124,17 +134,26 @@ def normalize_python_cstrings(data):
     return b'\0'.join(strings)
 
 
-def prepare_python_extensions(destination, extension_root=None):
+def python_library_path():
+    from PyInstaller.depend.bindepend import get_python_library_path
+    return Path(get_python_library_path()).resolve()
+
+
+def prepare_python_binaries(destination, extension_root=None, library=None):
     from macholib.MachO import MachO
     if extension_root is None:
         extension_root = Path(importlib.util.find_spec('array').origin).parent
+    if library is None:
+        library = python_library_path()
     destination.mkdir(parents=True, exist_ok=True)
     # This directory contains only generated Analysis inputs. A clean extension
     # must never be shadowed by a prior interpreter's normalized copy.
-    for previous in destination.glob('*.so'):
+    for previous in [*destination.glob('*.so'), destination / library.name]:
+        if not previous.exists():
+            continue
         previous.unlink()
     changed = False
-    for source in sorted(extension_root.glob('*.so')):
+    for source in [library, *sorted(extension_root.glob('*.so'))]:
         data = source.read_bytes()
         prepared = bytearray(data)
         # Only the reviewed CPython diagnostic filenames in read-only strings
@@ -164,6 +183,9 @@ def select_normalized_inputs(spec, normalized):
     original = Path(importlib.util.find_spec('array').origin).parent
     replacements = {str((original / path.name).resolve()): str(path.resolve())
                     for path in normalized.glob('*.so')}
+    library = python_library_path()
+    if (normalized / library.name).is_file():
+        replacements[str(library)] = str((normalized / library.name).resolve())
     text = spec.read_text()
     marker = '\npyz = PYZ('
     if text.count(marker) != 1:
@@ -225,7 +247,7 @@ def package():
         # paths before its existing Mach-O processing and ad-hoc signing.
         # Pinned tools are copied separately after freezing.
         command.append('--strip')
-        normalized = prepare_python_extensions(BUILD / 'python-input')
+        normalized = prepare_python_binaries(BUILD / 'python-input')
     for module in ('PySide6', 'PyQt6', 'PyQt5', 'PySide2', 'shiboken6', 'tkinter', 'matplotlib', 'numpy', 'scipy', 'pandas'):
         command.extend(['--exclude-module', module])
     for name in ('yt-dlp', 'yt-dlp-ejs', 'mutagen', 'requests', 'beautifulsoup4'):
@@ -282,7 +304,7 @@ def package():
         shutil.copytree(prepared, notices / 'release-tools', dirs_exist_ok=True)
     notice = 'SweatyDL bundles Python, yt-dlp, requests, BeautifulSoup, mutagen, Node.js and FFprobe plus their dependencies.\nPython: https://www.python.org/\nyt-dlp: https://github.com/yt-dlp/yt-dlp\nNode.js: https://nodejs.org/\nFFmpeg/FFprobe source and licensing: https://ffmpeg.org/legal.html\nMutagen source: https://github.com/quodlibet/mutagen\nReview all dependency licenses and included source/build materials before redistribution.\n'
     if platform.system() == 'Darwin':
-        notice += 'macOS packaging omits Python extension debug symbols and normalizes reviewed C diagnostic source-filename prefixes without changing executable instructions.\n'
+        notice += 'macOS packaging omits Python runtime and extension debug symbols and normalizes reviewed C diagnostic source-filename prefixes without changing executable instructions.\n'
     (notices / 'README.txt').write_text(notice)
     executable = staged / ('sweatydl-backend.exe' if os.name == 'nt' else 'sweatydl-backend')
     # Run with no development Python, Node or FFprobe on PATH and no project cwd.

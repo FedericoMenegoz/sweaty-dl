@@ -25,6 +25,13 @@ PUBLIC_SVG_EXPORT_RECORDS = frozenset({
     '97ae80094e1903329ae2d3cd7dfe329e478dbe64d851e7b63326c11b762d8a2c',
 })
 SVG_EXPORT_RECORD = re.compile(rb'inkscape:export-filename="[^"\0\r\n]{1,512}"')
+# The public Actions Python 3.13.15 macOS archive's complete VPATH C string,
+# checked against its shipped sysconfig and Makefile. Preserve lookup metadata;
+# normalize diagnostic filenames separately. Never store its home-path text.
+PUBLIC_BUILD_CSTRINGS = frozenset({
+    '691276d31f65ae40433abadca054528670223fc1dead4cf0b630503d5a2bc3a5',
+})
+BUILD_CSTRING = re.compile(rb'((?:/Users/|/home/)[^\x00\r\n]{1,512})\x00')
 # Complete public known-answer vectors compiled into GnuTLS 3.7.3 self-tests.
 # Never exempt a library or print/store the PEM bytes in scanner configuration.
 # https://github.com/gnutls/gnutls/blob/3.7.3/lib/crypto-selftests-pk.c
@@ -47,11 +54,14 @@ def _mask_public_self_tests(data):
     return SELF_TEST_PEM_RECORD.sub(mask_public_record, data)
 
 
-def _mask_public_svg_records(data):
+def _mask_public_home_records(data):
     def mask_public_record(match):
         value = match.group()
         return b'\0' * len(value) if hashlib.sha256(value).hexdigest() in PUBLIC_SVG_EXPORT_RECORDS else value
-    return SVG_EXPORT_RECORD.sub(mask_public_record, data)
+    data = SVG_EXPORT_RECORD.sub(mask_public_record, data)
+    def mask_build_record(match):
+        return b'\0' * len(match.group()) if hashlib.sha256(match[1]).hexdigest() in PUBLIC_BUILD_CSTRINGS else match.group()
+    return BUILD_CSTRING.sub(mask_build_record, data)
 
 
 def _buffered_match(pattern, data, final=False):
@@ -134,7 +144,7 @@ def scan_stream(stream, label=None, *, home_paths=True):
             # Never include the match in errors or CI logs.
             raise _scan_error('credential pattern', label)
         if home_paths:
-            home_data = _mask_public_svg_records(home_tail + block)
+            home_data = _mask_public_home_records(home_tail + block)
             match = _buffered_match(LOCAL_HOME, home_data)
             if home_offset is None and match:
                 home_offset = scanned_bytes - len(home_tail) + match.start()
